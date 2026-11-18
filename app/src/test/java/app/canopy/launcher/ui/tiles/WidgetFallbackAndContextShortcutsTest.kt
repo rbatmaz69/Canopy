@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Rect
 import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.ui.overlays.ContextMenuPositioner
+import app.canopy.launcher.ui.overlays.TileShortcutLabels
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -40,25 +41,27 @@ class WidgetFallbackAndContextShortcutsTest {
     @Test
     fun `every tile type yields targeted direct shortcuts`() {
         assertEquals(
-            listOf("Wecker stellen", "Timer 25 Min."),
+            listOf(TileShortcutLabels.OPEN_ALARMS, TileShortcutLabels.SET_TIMER),
             ContextMenuPositioner.shortcutsForTile(TileData("c", TileType.CLOCK, "Uhr")),
         )
         assertEquals(
-            listOf("Neuer Termin", "Wochenansicht"),
+            listOf(TileShortcutLabels.NEW_EVENT, TileShortcutLabels.OPEN_CALENDAR),
             ContextMenuPositioner.shortcutsForTile(TileData("cal", TileType.CALENDAR, "Kalender")),
         )
         assertEquals(
-            listOf("Gruppe umbenennen", "Apps verwalten"),
+            listOf(TileShortcutLabels.RENAME_GROUP, TileShortcutLabels.MANAGE_GROUP),
             ContextMenuPositioner.shortcutsForTile(TileData("grp", TileType.APP_GROUP, "Favoriten")),
         )
         assertEquals(
-            listOf("Neuer Eintrag", "Alle abhaken"),
+            listOf(TileShortcutLabels.EDIT_ENTRIES, TileShortcutLabels.CHECK_ALL),
             ContextMenuPositioner.shortcutsForTile(TileData("rem", TileType.REMINDERS, "Erinnerungen")),
         )
         assertEquals(
-            listOf("Mix wechseln", "Warteschlange"),
+            listOf(TileShortcutLabels.NEXT_TRACK, TileShortcutLabels.OPEN_MEDIA_APP),
             ContextMenuPositioner.shortcutsForTile(TileData("med", TileType.MEDIA, "Medien")),
         )
+        // No placeholder "Schnellaktion" for tiles without real shortcuts.
+        assertEquals(emptyList<String>(), ContextMenuPositioner.shortcutsForTile(TileData("app", TileType.SINGLE_APP, "App")))
     }
 
     @Test

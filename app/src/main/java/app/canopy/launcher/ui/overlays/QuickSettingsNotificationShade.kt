@@ -187,7 +187,6 @@ fun QuickSettingsNotificationShade(
     onOpenAppFromNotification: (appId: String, sourceRect: Rect?) -> Unit,
     onDismissNotification: (LauncherNotification) -> Unit,
     onDismissAllNotifications: () -> Unit,
-    onRestoreDemoNotifications: () -> Unit,
     onLongPressToggle: (SystemToggleKey) -> Unit = {},
 ) {
     val toggles = listOf(
@@ -195,8 +194,8 @@ fun QuickSettingsNotificationShade(
         ShadeToggleSpec(SystemToggleKey.BLUETOOTH, "Bluetooth", systemState.bluetooth, Icons.Rounded.Bluetooth),
         ShadeToggleSpec(SystemToggleKey.FLASHLIGHT, "Taschenlampe", systemState.flashlight, Icons.Rounded.FlashlightOn),
         ShadeToggleSpec(SystemToggleKey.DND, "Nicht stören", systemState.dnd, Icons.Rounded.DarkMode),
-        ShadeToggleSpec(SystemToggleKey.HOTSPOT, "Hotspot", systemState.hotspot, Icons.Rounded.Radio),
         ShadeToggleSpec(SystemToggleKey.AUTO_ROTATE, "Drehen", systemState.autoRotate, Icons.Rounded.ScreenRotation),
+        ShadeToggleSpec(SystemToggleKey.VOLUME, "Lautstärke", false, Icons.Rounded.Tune),
     )
 
     Box(
@@ -228,7 +227,7 @@ fun QuickSettingsNotificationShade(
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Schnelleinstellungen", color = theme.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Text("System-Panels öffnen", color = theme.textMuted, fontSize = 11.sp)
+                Text("Tippen öffnet das System-Panel", color = theme.textMuted, fontSize = 11.sp)
             }
 
             // 3x2 System Toggle Grid
@@ -268,31 +267,6 @@ fun QuickSettingsNotificationShade(
                 }
             }
 
-            // Brightness Slider
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0x1F7D7D91))
-                    .padding(horizontal = 10.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(15.dp))
-                Slider(
-                    value = systemState.brightness,
-                    onValueChange = systemState.onChangeBrightness,
-                    valueRange = 0.25f..1f,
-                    modifier = Modifier.weight(1f).height(26.dp),
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF38BDF8), activeTrackColor = Color(0xFF38BDF8)),
-                )
-                Text(
-                    text = "${(systemState.brightness * 100).roundToInt()} %",
-                    color = theme.textPrimary,
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
-                )
-            }
-
             Box(Modifier.fillMaxWidth().height(1.dp).background(theme.sheetBorder))
 
             // Notification Center Header
@@ -318,7 +292,7 @@ fun QuickSettingsNotificationShade(
                     )
                 } else {
                     val context = androidx.compose.ui.platform.LocalContext.current
-                    val hasAccess = remember(context) { NotificationBadgeStore.isNotificationAccessEnabled(context) }
+                    val hasAccess = NotificationBadgeStore.isNotificationAccessEnabled(context)
                     if (!hasAccess) {
                         Text(
                             text = "Zugriff erlauben",

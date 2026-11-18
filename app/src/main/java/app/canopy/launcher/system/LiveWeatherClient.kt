@@ -2,7 +2,7 @@ package app.canopy.launcher.system
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
-import app.canopy.launcher.data.SystemTileDefaults
+import android.content.SharedPreferences
 import app.canopy.launcher.data.TempPoint
 import app.canopy.launcher.data.WeatherHour
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -18,6 +19,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @Immutable
@@ -28,20 +32,29 @@ data class WeatherCityPreset(
     val longitude: Double,
 )
 
+/**
+ * Weather shown by the tiles. The default value means "no data yet" — tiles render an
+ * explicit empty state instead of made-up numbers while [isLiveFromNetwork] is false.
+ */
 @Immutable
+@Serializable
 data class WeatherSnapshot(
-    val cityId: String = "berlin",
-    val cityName: String = "Berlin",
-    val currentTempC: Int = 7,
-    val highTempC: Int = 11,
-    val lowTempC: Int = 4,
-    val conditionLabel: String = "Bewölkt, ab 17 Uhr leichter Regen",
-    val shortCondition: String = "Regen ab 17 Uhr",
-    val rainChancePercent: Int = 80,
-    val hourlyPoints: List<TempPoint> = SystemTileDefaults.TEMP_DAY_SERIES,
-    val hourlyForecasts: List<WeatherHour> = SystemTileDefaults.WEATHER_HOURS,
-    val peakHourLabel: String = "15h Peak",
+    val cityId: String = "",
+    val cityName: String = "",
+    val currentTempC: Int = 0,
+    val highTempC: Int = 0,
+    val lowTempC: Int = 0,
+    val conditionLabel: String = "",
+    val shortCondition: String = "",
+    val rainChancePercent: Int = 0,
+    val hourlyPoints: List<TempPoint> = emptyList(),
+    val hourlyForecasts: List<WeatherHour> = emptyList(),
+    val peakHourLabel: String = "",
+    /** True once this snapshot came from a real forecast (live or cached from an earlier fetch). */
     val isLiveFromNetwork: Boolean = false,
+    /** Wall-clock time of the fetch, e.g. "14:05". */
+    val updatedAtLabel: String = "",
+    val fetchedAtMillis: Long = 0L,
 )
 
 val LocalWeatherSnapshot = staticCompositionLocalOf { WeatherSnapshot() }
@@ -103,9 +116,9 @@ object OpenMeteoWeatherParser {
             ?.mapNotNull { it.jsonPrimitive.intOrNull }
             .orEmpty()
 
-        val highTemp = temps.maxOrNull()?.roundToInt() ?: maxOf(currentTemp + 2, 11)
-        val lowTemp = temps.minOrNull()?.roundToInt() ?: minOf(currentTemp - 3, 4)
-        val maxRain = rains.maxOrNull()?.coerceIn(0, 100) ?: 10
+        val highTemp = temps.maxOrNull()?.roundToInt() ?: currentTemp
+        val lowTemp = temps.minOrNull()?.roundToInt() ?: currentTemp
+        val maxRain = rains.maxOrNull()?.coerceIn(0, 100) ?: 0
 
         val curveIndices = listOf(6, 9, 12, 15, 18, 21)
         val curveLabels = listOf("06h", "09h", "12h", "15h", "18h", "21h")
@@ -114,7 +127,7 @@ object OpenMeteoWeatherParser {
                 TempPoint(lbl, temps[idx].toFloat())
             }
         } else {
-            SystemTileDefaults.TEMP_DAY_SERIES
+            emptyList()
         }
 
         val slotIndices = listOf(10, 13, 16, 19)
@@ -125,11 +138,11 @@ object OpenMeteoWeatherParser {
                 WeatherHour(lbl, "${temps[idx].roundToInt()}°", icon)
             }
         } else {
-            SystemTileDefaults.WEATHER_HOURS
+            emptyList()
         }
 
-        val peakIdx = temps.indices.maxByOrNull { temps[it] } ?: 15
-        val peakHourLabel = "${peakIdx.toString().padStart(2, '0')}h Peak"
+        val peakIdx = temps.indices.maxByOrNull { temps[it] }
+        val peakHourLabel = peakIdx?.let { "Max. um ${it.toString().padStart(2, '0')} Uhr" }.orEmpty()
 
         WeatherSnapshot(
             cityId = cityId,
@@ -149,19 +162,23 @@ object OpenMeteoWeatherParser {
 }
 
 /**
- * Fetches live Berlin/configurable forecast from Open-Meteo on Dispatchers.IO,
- * keeping instant offline fallback data if network is disabled.
+ * Fetches the forecast from Open-Meteo on Dispatchers.IO. The last successful forecast is
+ * cached so the tiles show real (if older) data after a restart while offline.
  */
-class LiveWeatherController {
-    private val _weatherFlow = MutableStateFlow(WeatherSnapshot())
+class LiveWeatherController(private val cache: SharedPreferences? = null) {
+    private val cacheJson = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+
+    private val _weatherFlow = MutableStateFlow(loadCached())
     val weatherFlow: StateFlow<WeatherSnapshot> = _weatherFlow.asStateFlow()
+
+    /** True when the cached forecast is older than [maxAgeMs] (or missing). */
+    fun isStale(maxAgeMs: Long = REFRESH_INTERVAL_MS, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val fetched = _weatherFlow.value.fetchedAtMillis
+        return fetched <= 0L || nowMs - fetched >= maxAgeMs
+    }
 
     suspend fun refreshForCity(cityId: String) {
         val preset = OpenMeteoWeatherParser.resolveCityPreset(cityId)
-        _weatherFlow.value = _weatherFlow.value.copy(
-            cityId = preset.id,
-            cityName = preset.name,
-        )
         refresh(
             latitude = preset.latitude,
             longitude = preset.longitude,
@@ -171,10 +188,10 @@ class LiveWeatherController {
     }
 
     suspend fun refresh(
-        latitude: Double = 52.52,
-        longitude: Double = 13.41,
-        cityName: String = "Berlin",
-        cityId: String = "berlin",
+        latitude: Double,
+        longitude: Double,
+        cityName: String,
+        cityId: String,
     ) {
         val parsed = withContext(Dispatchers.IO) {
             runCatching {
@@ -182,7 +199,8 @@ class LiveWeatherController {
                     "https://api.open-meteo.com/v1/forecast" +
                         "?latitude=$latitude&longitude=$longitude" +
                         "&current=temperature_2m,weather_code" +
-                        "&hourly=temperature_2m,precipitation_probability&forecast_days=1"
+                        "&hourly=temperature_2m,precipitation_probability" +
+                        "&forecast_days=1&timezone=auto"
                 )
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     connectTimeout = 5000
@@ -200,7 +218,26 @@ class LiveWeatherController {
             }.getOrNull()
         }
         if (parsed != null) {
-            _weatherFlow.value = parsed
+            val now = System.currentTimeMillis()
+            val stamped = parsed.copy(
+                fetchedAtMillis = now,
+                updatedAtLabel = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(now)),
+            )
+            _weatherFlow.value = stamped
+            runCatching { cache?.edit()?.putString(CACHE_KEY, cacheJson.encodeToString(WeatherSnapshot.serializer(), stamped))?.apply() }
+        } else if (_weatherFlow.value.cityId != cityId) {
+            // Never show the previous city's forecast under a newly chosen place.
+            _weatherFlow.value = WeatherSnapshot(cityId = cityId, cityName = cityName)
         }
+    }
+
+    private fun loadCached(): WeatherSnapshot {
+        val raw = cache?.getString(CACHE_KEY, null) ?: return WeatherSnapshot()
+        return runCatching { cacheJson.decodeFromString(WeatherSnapshot.serializer(), raw) }.getOrNull() ?: WeatherSnapshot()
+    }
+
+    companion object {
+        const val REFRESH_INTERVAL_MS = 30L * 60L * 1000L
+        private const val CACHE_KEY = "weather_snapshot_v1"
     }
 }

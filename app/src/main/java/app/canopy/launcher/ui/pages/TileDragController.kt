@@ -323,7 +323,7 @@ fun FloatingDragGhostOverlay(
             onOpenApp = { _, _ -> },
             onOpenGroup = { _, _, _ -> },
             onOpenSearch = {},
-            onOpenFakeTileApp = { _, _ -> },
+            onOpenTileTarget = { _, _ -> },
             onUpdateTile = { _, _ -> },
             calendarEvents = calendarEvents,
             mediaState = mediaState,

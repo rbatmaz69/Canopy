@@ -1,6 +1,7 @@
 package app.canopy.launcher.ui.tiles
 
 import app.canopy.launcher.data.SystemTileDefaults
+import app.canopy.launcher.layout.ReminderItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,27 +9,41 @@ import org.junit.Test
 
 class EigenTilesBehaviorTest {
     @Test
-    fun `toggling and adding quick reminders updates state directly`() {
-        val initial = SystemTileDefaults.DEFAULT_REMINDERS
-        val toggled = EigenTileActions.toggleReminder(initial, "r2")
-        assertTrue(toggled.first { it.id == "r2" }.done)
-        assertFalse(EigenTileActions.toggleReminder(toggled, "r2").first { it.id == "r2" }.done)
+    fun `new reminder tiles start empty instead of demo entries`() {
+        assertTrue(SystemTileDefaults.DEFAULT_REMINDERS.isEmpty())
+        assertTrue(SystemTileDefaults.DEFAULT_NOTE_LINES.isEmpty())
+    }
 
-        val added = EigenTileActions.addQuickReminder(initial)
-        assertEquals(initial.size + 1, added.size)
+    @Test
+    fun `toggling and adding typed reminders updates state directly`() {
+        val initial = listOf(ReminderItem("r1", "Paket abholen", false))
+        val toggled = EigenTileActions.toggleReminder(initial, "r1")
+        assertTrue(toggled.first { it.id == "r1" }.done)
+        assertFalse(EigenTileActions.toggleReminder(toggled, "r1").first { it.id == "r1" }.done)
+
+        val added = EigenTileActions.addReminder(initial, "  Arzt anrufen ", nowMillis = 42L)
+        assertEquals(2, added.size)
+        assertEquals("Arzt anrufen", added.first().text)
         assertFalse(added.first().done)
+
+        // Blank input never creates an entry.
+        assertEquals(initial, EigenTileActions.addReminder(initial, "   "))
 
         val allChecked = EigenTileActions.checkAllReminders(added)
         assertTrue(allChecked.all { it.done })
     }
 
     @Test
-    fun `photo scene switcher cycles cleanly across all scenes`() {
-        val count = SystemTileDefaults.PHOTO_SCENES.size
-        assertEquals(3, count)
-        assertEquals(1, EigenTileActions.nextPhotoSceneIndex(0))
-        assertEquals(2, EigenTileActions.nextPhotoSceneIndex(1))
-        assertEquals(0, EigenTileActions.nextPhotoSceneIndex(2))
+    fun `note lines only grow from real text`() {
+        assertEquals(listOf("Neu", "Alt"), EigenTileActions.addNoteLine(listOf("Alt"), " Neu "))
+        assertEquals(listOf("Alt"), EigenTileActions.addNoteLine(listOf("Alt"), ""))
+    }
+
+    @Test
+    fun `photo decoder picks a power of two sample size close to the tile`() {
+        assertEquals(1, PhotoDecoder.computeSampleSize(800, 600, 400))
+        assertEquals(4, PhotoDecoder.computeSampleSize(4000, 3000, 600))
+        assertEquals(1, PhotoDecoder.computeSampleSize(0, 0, 600))
     }
 
     @Test

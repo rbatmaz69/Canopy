@@ -61,7 +61,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import kotlinx.coroutines.launch
@@ -278,9 +277,9 @@ fun SearchBarTile(props: TileContentProps) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NewlyInstalledTile(props: TileContentProps) {
-    val appsById = props.allAppsCatalog.associateBy { it.id }.ifEmpty { MockCatalogData.APPS_BY_ID }
-    val appIds = props.tile.newAppIds ?: listOf("app-skizze", "app-fokus", "app-klima")
-    val apps = appIds.mapNotNull { appsById[it] }
+    val apps = remember(props.allAppsCatalog) {
+        props.allAppsCatalog.filter { it.isNew }
+    }
     var selectedActionApp by remember { mutableStateOf<Pair<AppDefinition, Rect?>?>(null) }
 
     if (props.tier == TileSizeTier.XS) {
@@ -345,7 +344,7 @@ fun AllAppsBoxTile(
     props: TileContentProps,
     onLetterTick: (String) -> Unit = {},
 ) {
-    val catalog = props.allAppsCatalog.ifEmpty { MockCatalogData.APPS_CATALOG }
+    val catalog = props.allAppsCatalog
     var sortMode by remember { mutableStateOf(AllAppsSortMode.A_Z) }
     var activeLetter by remember { mutableStateOf<String?>(null) }
     var lastHapticLetter by remember { mutableStateOf<String?>(null) }

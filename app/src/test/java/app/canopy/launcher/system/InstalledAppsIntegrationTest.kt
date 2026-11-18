@@ -89,7 +89,7 @@ class InstalledAppsIntegrationTest {
         assertEquals("↗ Neuer Chat", combined[0])
         assertEquals("↗ Mara Weber", combined[1])
         assertFalse(combined.any { it.contains("Extra ignoriert") })
-        assertTrue(combined.contains("Schnellaktion"))
-        assertTrue(combined.contains("App-Info"))
+        // No placeholder actions for app tiles: only real native shortcuts are listed.
+        assertEquals(2, combined.size)
     }
 }

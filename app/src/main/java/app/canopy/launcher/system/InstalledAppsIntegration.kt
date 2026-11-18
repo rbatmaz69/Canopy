@@ -356,7 +356,7 @@ class DeviceAppsController(private val context: Context) {
         }.getOrDefault(emptyList())
 
         _catalogFlow.value = InstalledAppsMapper.mergeWithCatalog(
-            catalog = MockCatalogData.APPS_CATALOG,
+            catalog = emptyList(),
             installed = entries,
             selfPackage = context.packageName ?: "app.canopy.launcher",
         )

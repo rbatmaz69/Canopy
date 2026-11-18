@@ -1,9 +1,12 @@
 package app.canopy.launcher.system
 
+import android.Manifest
+import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -11,8 +14,12 @@ import android.hardware.SensorManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.BatteryManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.core.content.ContextCompat
 import app.canopy.launcher.system.LiveHardwareMath.computeStepMetrics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,9 +56,14 @@ data class HardwareTelemetrySnapshot(
     val greetingTwoLine: String = "Guten\nMorgen",
     val batteryPercent: Int = 84,
     val isCharging: Boolean = false,
-    val estimatedHoursLeft: Int = 19,
-    val steps: StepMetrics = computeStepMetrics(baseSteps = 7420, sensorDelta = 0, bonusSteps = 0),
-    val onAddBonusSteps: (Int) -> Unit = {},
+    /** True once a real step counter reading for today exists (sensor present + permission granted). */
+    val stepsAvailable: Boolean = false,
+    val steps: StepMetrics = computeStepMetrics(baseSteps = 0, sensorDelta = 0, bonusSteps = 0),
+    /** Next system alarm (from AlarmManager), formatted HH:mm, or null when none is set. */
+    val nextAlarmLabel: String? = null,
+    /** Whether the next alarm rings today (false = a later day). */
+    val nextAlarmIsToday: Boolean = true,
+    val torchOn: Boolean = false,
 )
 
 val LocalHardwareTelemetry = staticCompositionLocalOf { HardwareTelemetrySnapshot() }
@@ -114,8 +126,39 @@ object LiveHardwareMath {
         return Triple(safePercent, ratio, estHours)
     }
 
+    /**
+     * Persisted per-day step baseline for TYPE_STEP_COUNTER (which counts since boot).
+     * [carry] keeps steps counted earlier today before a reboot reset the hardware counter.
+     */
+    data class DailyStepBaseline(
+        val dayKey: String,
+        val baseline: Int,
+        val carry: Int,
+        val lastRaw: Int,
+    )
+
+    /**
+     * Returns the updated baseline and today's step count for a new raw sensor reading.
+     * New day → baseline is the current raw value. Counter went backwards (reboot) → bank
+     * what was counted so far into [DailyStepBaseline.carry] and restart from zero.
+     */
+    fun advanceDailySteps(previous: DailyStepBaseline?, todayKey: String, raw: Int): Pair<DailyStepBaseline, Int> {
+        val safeRaw = max(0, raw)
+        val next = when {
+            previous == null || previous.dayKey != todayKey -> DailyStepBaseline(todayKey, safeRaw, 0, safeRaw)
+            safeRaw < previous.lastRaw -> DailyStepBaseline(
+                dayKey = todayKey,
+                baseline = 0,
+                carry = previous.carry + max(0, previous.lastRaw - previous.baseline),
+                lastRaw = safeRaw,
+            )
+            else -> previous.copy(lastRaw = safeRaw)
+        }
+        return next to (next.carry + max(0, next.lastRaw - next.baseline))
+    }
+
     fun computeStepMetrics(
-        baseSteps: Int = 7420,
+        baseSteps: Int = 0,
         sensorDelta: Int = 0,
         bonusSteps: Int = 0,
         goalSteps: Int = 10_000,
@@ -146,12 +189,13 @@ object LiveHardwareMath {
 
 /**
  * Runtime controller subscribing to Android system time ticks, battery broadcasts,
- * optional hardware step counter sensors, and camera LED torch mode.
+ * the next system alarm, the hardware step counter (with a persisted daily baseline)
+ * and the camera torch state.
  */
 class LiveHardwareController(private val context: Context) {
-    private var initialSensorSteps: Int? = null
-    private var sensorDeltaSteps: Int = 0
-    private var bonusSteps: Int = 0
+    private val prefs = context.getSharedPreferences("canopy_hardware", Context.MODE_PRIVATE)
+    private var stepBaseline: LiveHardwareMath.DailyStepBaseline? = loadStepBaseline()
+    private var stepListenerRegistered = false
 
     private val _telemetryFlow = MutableStateFlow(createInitialSnapshot())
     val telemetryFlow: StateFlow<HardwareTelemetrySnapshot> = _telemetryFlow.asStateFlow()
@@ -164,13 +208,39 @@ class LiveHardwareController(private val context: Context) {
         context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
     }.getOrNull()
 
+    private val alarmManager: AlarmManager? = runCatching {
+        context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+    }.getOrNull()
+
+    private val torchCameraId: String? by lazy {
+        runCatching {
+            cameraManager?.cameraIdList?.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        }.getOrNull()
+    }
+
+    private val torchCallback = object : CameraManager.TorchCallback() {
+        override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+            if (cameraId == torchCameraId) _telemetryFlow.update { it.copy(torchOn = enabled) }
+        }
+
+        override fun onTorchModeUnavailable(cameraId: String) {
+            if (cameraId == torchCameraId) _telemetryFlow.update { it.copy(torchOn = false) }
+        }
+    }
+
     private val timeAndBatteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_TIME_TICK,
                 Intent.ACTION_TIME_CHANGED,
-                Intent.ACTION_TIMEZONE_CHANGED -> updateClock()
+                Intent.ACTION_TIMEZONE_CHANGED -> {
+                    updateClock()
+                    updateNextAlarm()
+                }
                 Intent.ACTION_BATTERY_CHANGED -> updateBatteryFromIntent(intent)
+                AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED -> updateNextAlarm()
             }
         }
     }
@@ -178,24 +248,23 @@ class LiveHardwareController(private val context: Context) {
     private val stepListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent?) {
             val raw = event?.values?.firstOrNull()?.roundToInt() ?: return
-            val base = initialSensorSteps ?: raw.also { initialSensorSteps = it }
-            sensorDeltaSteps = max(0, raw - base)
-            updateSteps()
+            val (nextBaseline, today) = LiveHardwareMath.advanceDailySteps(stepBaseline, todayKey(), raw)
+            stepBaseline = nextBaseline
+            saveStepBaseline(nextBaseline)
+            _telemetryFlow.update { cur ->
+                cur.copy(stepsAvailable = true, steps = computeStepMetrics(baseSteps = today))
+            }
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     }
 
-    private fun createInitialSnapshot(): HardwareTelemetrySnapshot {
-        val base = LiveHardwareMath.formatClockFields(System.currentTimeMillis())
-        return base.copy(
-            steps = computeStepMetrics(baseSteps = 7420, sensorDelta = sensorDeltaSteps, bonusSteps = bonusSteps),
-            onAddBonusSteps = ::addBonusSteps,
-        )
-    }
+    private fun createInitialSnapshot(): HardwareTelemetrySnapshot =
+        LiveHardwareMath.formatClockFields(System.currentTimeMillis())
 
     fun start() {
         updateClock()
+        updateNextAlarm()
         runCatching {
             val stickyBattery = context.registerReceiver(
                 timeAndBatteryReceiver,
@@ -204,36 +273,39 @@ class LiveHardwareController(private val context: Context) {
                     addAction(Intent.ACTION_TIME_CHANGED)
                     addAction(Intent.ACTION_TIMEZONE_CHANGED)
                     addAction(Intent.ACTION_BATTERY_CHANGED)
+                    addAction(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED)
                 },
             )
             updateBatteryFromIntent(stickyBattery)
         }
-        runCatching {
-            val stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-            if (stepSensor != null) {
-                sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_UI)
-            }
-        }
+        runCatching { cameraManager?.registerTorchCallback(torchCallback, Handler(Looper.getMainLooper())) }
+        registerStepSensorIfPermitted()
     }
 
     fun stop() {
         runCatching { context.unregisterReceiver(timeAndBatteryReceiver) }
+        runCatching { cameraManager?.unregisterTorchCallback(torchCallback) }
         runCatching { sensorManager?.unregisterListener(stepListener) }
+        stepListenerRegistered = false
     }
 
-    fun addBonusSteps(delta: Int = 250) {
-        bonusSteps = max(0, bonusSteps + delta)
-        updateSteps()
+    /** Re-checks runtime permissions (e.g. after onboarding) and registers the step sensor once allowed. */
+    fun registerStepSensorIfPermitted() {
+        if (stepListenerRegistered) return
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+        runCatching {
+            val stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return@runCatching
+            stepListenerRegistered = sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+        }
     }
 
     fun setTorchEnabled(enabled: Boolean): Boolean {
         val cm = cameraManager ?: return false
+        val id = torchCameraId ?: return false
         return runCatching {
-            val cameraId = cm.cameraIdList.firstOrNull { id ->
-                val chars = cm.getCameraCharacteristics(id)
-                chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
-            } ?: return@runCatching false
-            cm.setTorchMode(cameraId, enabled)
+            cm.setTorchMode(id, enabled)
             true
         }.getOrDefault(false)
     }
@@ -253,6 +325,21 @@ class LiveHardwareController(private val context: Context) {
         }
     }
 
+    private fun updateNextAlarm() {
+        val next = runCatching { alarmManager?.nextAlarmClock }.getOrNull()
+        val label: String?
+        val isToday: Boolean
+        if (next == null) {
+            label = null
+            isToday = true
+        } else {
+            val date = Date(next.triggerTime)
+            label = SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
+            isToday = todayKey() == dayKeyFormat().format(date)
+        }
+        _telemetryFlow.update { it.copy(nextAlarmLabel = label, nextAlarmIsToday = isToday) }
+    }
+
     private fun updateBatteryFromIntent(intent: Intent?) {
         if (intent == null) return
         val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
@@ -260,18 +347,30 @@ class LiveHardwareController(private val context: Context) {
         val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
         val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
             status == BatteryManager.BATTERY_STATUS_FULL
-        val (pct, _, estHours) = LiveHardwareMath.computeBatteryMetrics(level, scale, charging)
-        _telemetryFlow.update { cur ->
-            cur.copy(
-                batteryPercent = pct,
-                isCharging = charging,
-                estimatedHoursLeft = estHours,
-            )
-        }
+        val (pct, _, _) = LiveHardwareMath.computeBatteryMetrics(level, scale, charging)
+        _telemetryFlow.update { cur -> cur.copy(batteryPercent = pct, isCharging = charging) }
     }
 
-    private fun updateSteps() {
-        val nextSteps = computeStepMetrics(baseSteps = 7420, sensorDelta = sensorDeltaSteps, bonusSteps = bonusSteps)
-        _telemetryFlow.update { cur -> cur.copy(steps = nextSteps) }
+    private fun dayKeyFormat() = SimpleDateFormat("yyyyMMdd", Locale.US)
+
+    private fun todayKey(): String = dayKeyFormat().format(Date())
+
+    private fun loadStepBaseline(): LiveHardwareMath.DailyStepBaseline? {
+        val day = prefs.getString("steps_day", null) ?: return null
+        return LiveHardwareMath.DailyStepBaseline(
+            dayKey = day,
+            baseline = prefs.getInt("steps_baseline", 0),
+            carry = prefs.getInt("steps_carry", 0),
+            lastRaw = prefs.getInt("steps_last_raw", 0),
+        )
+    }
+
+    private fun saveStepBaseline(b: LiveHardwareMath.DailyStepBaseline) {
+        prefs.edit()
+            .putString("steps_day", b.dayKey)
+            .putInt("steps_baseline", b.baseline)
+            .putInt("steps_carry", b.carry)
+            .putInt("steps_last_raw", b.lastRaw)
+            .apply()
     }
 }

@@ -85,29 +85,28 @@ enum class SystemToggleKey {
     BLUETOOTH,
     FLASHLIGHT,
     DND,
-    HOTSPOT,
     AUTO_ROTATE,
+    VOLUME,
 }
 
 @Immutable
 data class SystemControlState(
-    val wifi: Boolean = true,
-    val bluetooth: Boolean = true,
+    val wifi: Boolean = false,
+    val bluetooth: Boolean = false,
     val flashlight: Boolean = false,
     val dnd: Boolean = false,
-    val hotspot: Boolean = false,
-    val autoRotate: Boolean = true,
-    val brightness: Float = 0.9f,
+    val autoRotate: Boolean = false,
     val onToggle: (SystemToggleKey) -> Unit = {},
     val onOpenSystemPanel: (SystemToggleKey) -> Unit = {},
-    val onChangeBrightness: (Float) -> Unit = {},
 )
 
 @Immutable
 data class MediaPlayerState(
     val trackIndex: Int = 0,
-    val isPlaying: Boolean = true,
-    val progress: Float = 0.36f,
+    val isPlaying: Boolean = false,
+    val progress: Float = 0f,
+    /** Package of the app owning the active media session, if any. */
+    val sessionPackage: String? = null,
     val overrideTrack: MediaTrack? = null,
     val onTogglePlay: () -> Unit = {},
     val onPrev: () -> Unit = {},
@@ -130,7 +129,7 @@ data class TileContentProps(
     val onOpenApp: (appId: String, sourceRect: Rect?) -> Unit,
     val onOpenGroup: (tile: TileData, leafId: String, sourceRect: Rect?) -> Unit,
     val onOpenSearch: () -> Unit,
-    val onOpenFakeTileApp: (tile: TileData, sourceRect: Rect?) -> Unit,
+    val onOpenTileTarget: (tile: TileData, sourceRect: Rect?) -> Unit,
     val onUpdateTile: (leafId: String, updater: (TileData) -> TileData) -> Unit,
     val calendarEvents: List<CalendarEvent>,
     val mediaState: MediaPlayerState,

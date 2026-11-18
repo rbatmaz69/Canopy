@@ -44,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -143,6 +144,12 @@ import app.canopy.launcher.ui.tiles.LocalAppWidgetHostFactory
 import app.canopy.launcher.ui.tiles.MediaPlayerState
 import app.canopy.launcher.ui.tiles.SystemControlState
 import app.canopy.launcher.ui.tiles.SystemToggleKey
+import app.canopy.launcher.ui.tiles.AppManagementActions
+import app.canopy.launcher.ui.tiles.AppProfile
+import app.canopy.launcher.ui.tiles.LocalAppManagement
+import app.canopy.launcher.layout.AppReferencePruner
+import app.canopy.launcher.ui.overlays.RenameDialog
+import app.canopy.launcher.ui.overlays.PagePickerDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -150,6 +157,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun CanopyLauncherApp(
     homeIntentSignal: Long = 0L,
+    homeFromApp: Boolean = true,
     onSystemBarAppearance: (useLightIcons: Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -199,6 +207,9 @@ fun CanopyLauncherApp(
     var weatherLocation by holder.field({ it.weatherLocation }, { copy(weatherLocation = it) })
     var lockPortrait by holder.field({ it.lockPortrait }, { copy(lockPortrait = it) })
     var onboardingCompleted by holder.field({ it.onboardingCompleted }, { copy(onboardingCompleted = it) })
+    var hiddenAppIds by holder.field({ it.hiddenAppIds }, { copy(hiddenAppIds = it) })
+    var appLabelOverrides by holder.field({ it.appLabelOverrides }, { copy(appLabelOverrides = it) })
+    val privateSpaceLocked by services.deviceApps.privateSpaceLocked.collectAsState()
     var editHistory by holder.historyField()
     val currentSnapshot = holder.state
     var showSetupOverlay by remember { mutableStateOf(!holder.state.onboardingCompleted) }
@@ -264,9 +275,15 @@ fun CanopyLauncherApp(
     val badgeCounts = remember(notifSyncState.notifications) {
         notifSyncState.notifications.groupingBy { it.appId }.eachCount()
     }
-    val boostedAppsCatalog = remember(liveAppsCatalog, appUsageCounts, badgeCounts) {
-        AllAppsCatalogSorter.applyUsageBoost(liveAppsCatalog, appUsageCounts)
-            .map { app -> badgeCounts[app.id]?.let { app.copy(badge = it) } ?: app }
+    val boostedAppsCatalog = remember(liveAppsCatalog, appUsageCounts, badgeCounts, appLabelOverrides) {
+        AllAppsCatalogSorter.applyUsageBoost(liveAppsCatalog, appUsageCounts).map { app ->
+            val renamed = appLabelOverrides[app.id]?.let { app.copy(name = it) } ?: app
+            badgeCounts[app.badgeKey]?.let { renamed.copy(badge = it) } ?: renamed
+        }
+    }
+    // Search and pickers never show hidden apps; tiles that already use one keep working.
+    val visibleAppsCatalog = remember(boostedAppsCatalog, hiddenAppIds) {
+        boostedAppsCatalog.filterNot { it.id in hiddenAppIds }
     }
 
     val calendarEvents by services.content.calendarEvents.collectAsState()
@@ -306,10 +323,30 @@ fun CanopyLauncherApp(
     var developerMode by remember { mutableStateOf(BuildConfig.DEBUG) }
     var pendingConfirm by remember { mutableStateOf<PendingConfirmation?>(null) }
     var lastGroupRecordMs by remember { mutableLongStateOf(0L) }
+    var renameAppId by remember { mutableStateOf<String?>(null) }
+    var pinAppId by remember { mutableStateOf<String?>(null) }
     var undoSnapshot by remember { mutableStateOf<UndoSnapshot?>(null) }
     var activeDrag by remember { mutableStateOf<ActiveTileDrag?>(null) }
     var lastDividerRecordMs by remember { mutableLongStateOf(0L) }
     val updatePagesWithHistory: (List<LauncherPage>) -> Unit = { next -> holder.updatePagesWithHistory(next) }
+
+    // A really uninstalled app disappears from all pages; the banner offers Undo.
+    LaunchedEffect(deviceAppsController) {
+        deviceAppsController.removedPackages.collect { removed ->
+            val before = pages
+            val result = AppReferencePruner.prune(before) { id ->
+                AppReferencePruner.matchesPackage(id, removed.packageName, removed.userSerial)
+            }
+            if (result.pages != before) {
+                holder.updatePagesWithHistory(result.pages)
+                result.releasedWidgetIds.forEach { wid -> runCatching { services.appWidgetHost?.deleteAppWidgetId(wid) } }
+                if (result.removedTiles > 0) {
+                    undoSnapshot = UndoSnapshot(before, "Deinstallierte App")
+                }
+            }
+            appUsageCounts = appUsageCounts.filterKeys { !AppReferencePruner.matchesPackage(it, removed.packageName, removed.userSerial) }
+        }
+    }
 
     LaunchedEffect(statusToast) {
         if (statusToast != null) {
@@ -379,27 +416,38 @@ fun CanopyLauncherApp(
         onDispose { unsub() }
     }
 
-    val systemWallpaperHue = remember(context, useSystemWallpaper) {
-        if (!useSystemWallpaper) null
-        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            runCatching {
-                val color = WallpaperManager.getInstance(context)
-                    .getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
-                    ?.primaryColor
-                color?.let { c ->
-                    CanopyThemes.rgbToHue(
-                        (c.red() * 255f).toInt(),
-                        (c.green() * 255f).toInt(),
-                        (c.blue() * 255f).toInt(),
-                    )
-                }
-            }.getOrNull()
+    // Follow live wallpaper colour changes (new wallpaper, dark/light variants).
+    var wallpaperColorsTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(useSystemWallpaper) {
+        val wm = runCatching { WallpaperManager.getInstance(context) }.getOrNull()
+        val listener = if (useSystemWallpaper && wm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            WallpaperManager.OnColorsChangedListener { _, _ -> wallpaperColorsTick += 1 }.also { l ->
+                runCatching { wm.addOnColorsChangedListener(l, android.os.Handler(android.os.Looper.getMainLooper())) }
+            }
         } else null
+        onDispose { if (listener != null) runCatching { wm?.removeOnColorsChangedListener(listener) } }
+    }
+    val systemWallpaperColors = remember(context, useSystemWallpaper, wallpaperColorsTick) {
+        if (!useSystemWallpaper || Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) null
+        else runCatching { WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM) }.getOrNull()
+    }
+    val systemWallpaperHue = remember(systemWallpaperColors) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) null
+        else systemWallpaperColors?.primaryColor?.let { c ->
+            CanopyThemes.rgbToHue((c.red() * 255f).toInt(), (c.green() * 255f).toInt(), (c.blue() * 255f).toInt())
+        }
+    }
+    // Bright wallpapers announce HINT_SUPPORTS_DARK_TEXT → use dark status bar icons on them.
+    val wallpaperWantsDarkText = remember(systemWallpaperColors) {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ((systemWallpaperColors?.colorHints ?: 0) and android.app.WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0
     }
 
     val theme = CanopyThemes.getThemeTokens(themeId, colorMode, wallpaperId, overrideBaseHue = systemWallpaperHue)
     LaunchedEffect(theme.mode, theme.isGlass, useSystemWallpaper) {
-        onSystemBarAppearance(theme.mode == ColorMode.DARK || theme.isGlass || useSystemWallpaper)
+        onSystemBarAppearance(
+            if (useSystemWallpaper) !wallpaperWantsDarkText else theme.mode == ColorMode.DARK || theme.isGlass
+        )
     }
     val iconStyle = IconStyleConfig(
         tonalIcons = tonalIcons,
@@ -448,6 +496,19 @@ fun CanopyLauncherApp(
             pageOffsetAnim.snapTo(-clamped * screenWidthPx)
         }
 
+        // Let the system wallpaper scroll with the pages, like a native launcher.
+        LaunchedEffect(useSystemWallpaper, pages.size, screenWidthPx) {
+            if (!useSystemWallpaper) return@LaunchedEffect
+            val wm = runCatching { WallpaperManager.getInstance(context) }.getOrNull() ?: return@LaunchedEffect
+            val steps = (pages.size - 1).coerceAtLeast(1)
+            runCatching { wm.setWallpaperOffsetSteps(1f / steps, 0f) }
+            snapshotFlow { pageOffsetAnim.value }.collect { offsetPx ->
+                val token = rootView.windowToken ?: return@collect
+                val x = WindowInsetsAndWallpaperMath.wallpaperOffsetFraction(offsetPx, screenWidthPx, pages.size)
+                runCatching { wm.setWallpaperOffsets(token, x, 0.5f) }
+            }
+        }
+
         val snapToPage: (Int, Float) -> Unit = { targetIdx, velocityPxPerSec ->
             val clamped = targetIdx.coerceIn(0, pages.lastIndex.coerceAtLeast(0))
             activePageIndex = clamped
@@ -467,8 +528,7 @@ fun CanopyLauncherApp(
             val launchedReal = deviceAppsController.launchApp(
                 rootView = rootView,
                 appDef = appDef,
-                sourceRectDp = sourceRect,
-                density = density.density,
+                sourceRectPx = sourceRect,
                 screenWidthPx = screenWidthPx.toInt(),
                 screenHeightPx = screenHeightPx.toInt(),
                 shortcutLabel = shortcut,
@@ -529,7 +589,16 @@ fun CanopyLauncherApp(
         }
 
         LaunchedEffect(homeIntentSignal) {
-            if (homeIntentSignal > 0L) {
+            if (homeIntentSignal == 0L) return@LaunchedEffect
+            val homeIdx = pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
+            val anyOverlay = tileDetail != null || pendingConfirm != null || openGroupState != null || contextMenu != null ||
+                showSearch || showCatalog || showPageOverview || showQuickShade || showDevMenu || showGestureGuide || isEditMode
+            if (!homeFromApp && anyOverlay) {
+                // Already home: the first press closes what is open, the next one goes to the start page.
+                handleBackAction()
+                return@LaunchedEffect
+            }
+            run {
                 tileDetail = null
                 pendingConfirm = null
                 showGestureGuide = false
@@ -541,8 +610,13 @@ fun CanopyLauncherApp(
                 showQuickShade = false
                 showDevMenu = false
                 isEditMode = false
-                val homeIdx = pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
-                snapToPage(homeIdx, 0f)
+                if (homeFromApp) {
+                    // Returning from an app: be on the start page instantly, no swipe animation.
+                    activePageIndex = homeIdx
+                    pageOffsetAnim.snapTo(-homeIdx * screenWidthPx)
+                } else {
+                    snapToPage(homeIdx, 0f)
+                }
             }
         }
 
@@ -625,6 +699,25 @@ fun CanopyLauncherApp(
                 }
             }
         }
+        // Release AppWidget ids nobody references any more (removed tiles whose undo window and
+        // history are gone). Runs whenever the launcher becomes visible.
+        LaunchedEffect(appWidgetHost) {
+            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val host = appWidgetHost ?: return@repeatOnLifecycle
+                val referenced = buildSet {
+                    addAll(AppReferencePruner.referencedWidgetIds(pages))
+                    holder.editHistory.undoStack.forEach { addAll(AppReferencePruner.referencedWidgetIds(it)) }
+                    holder.editHistory.redoStack.forEach { addAll(AppReferencePruner.referencedWidgetIds(it)) }
+                    undoSnapshot?.let { addAll(AppReferencePruner.referencedWidgetIds(it.pages)) }
+                    pendingWidgetBind?.first?.let { add(it) }
+                    pendingWidgetConfigure?.first?.let { add(it) }
+                }
+                runCatching { host.appWidgetIds }.getOrNull()
+                    ?.filterNot { it in referenced }
+                    ?.forEach { orphan -> runCatching { host.deleteAppWidgetId(orphan) } }
+            }
+        }
+
         val dropPreview = activeDrag?.let { drag ->
             val pointerXDp = with(density) { drag.pointerXRootPx.toDp().value }
             val pointerYDp = with(density) { (drag.pointerYRootPx - with(density) { statusBarH.dp.toPx() }).toDp().value }
@@ -649,6 +742,20 @@ fun CanopyLauncherApp(
             LocalHardwareTelemetry provides hardwareTelemetry,
             LocalWeatherSnapshot provides weatherSnapshot,
             LocalAppWidgetHostFactory provides widgetHostFactory,
+            LocalAppManagement provides AppManagementActions(
+                hiddenAppIds = hiddenAppIds,
+                privateSpaceLocked = privateSpaceLocked,
+                onHideApp = { id ->
+                    hiddenAppIds = hiddenAppIds + id
+                    statusToast = "App ausgeblendet. Einblenden unter Einstellungen → Ausgeblendete Apps."
+                },
+                onRenameApp = { id -> renameAppId = id },
+                onUnlockPrivateSpace = {
+                    if (!deviceAppsController.setProfileQuietMode(AppProfile.PRIVATE, quiet = false)) {
+                        statusToast = "Der private Bereich lässt sich nur entsperren, wenn Canopy Standard-Launcher ist."
+                    }
+                },
+            ),
         ) {
             Box(
                 modifier = Modifier
@@ -824,47 +931,12 @@ fun CanopyLauncherApp(
                             mediaState = mediaState,
                             systemState = systemState,
                             allAppsCatalog = boostedAppsCatalog,
-                            onPinAppToHome = { appId ->
-                                val appDef = boostedAppsCatalog.firstOrNull { it.id == appId }
-                                if (appDef != null) {
-                                    val tile = TileData(
-                                        id = TilingEngine.createNodeId("pin"),
-                                        type = TileType.SINGLE_APP,
-                                        title = appDef.name,
-                                        appId = appDef.id,
-                                        accentHue = appDef.hue,
-                                    )
-                                    val targetHomeIdx = pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
-                                    val homePg = pages.getOrNull(targetHomeIdx)
-                                    if (homePg != null && homePg.kind != PageKind.ALL_APPS) {
-                                        updatePagesWithHistory(
-                                            pages.map { p ->
-                                                if (p.id == homePg.id) {
-                                                    CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, tile, pageBoundsDp, gapDp)
-                                                } else p
-                                            }
-                                        )
-                                        CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
-                                        snapToPage(targetHomeIdx, 0f)
-                                    }
-                                }
-                            },
+                            onPinAppToHome = { appId -> pinAppId = appId },
                             onShowAppDetails = { appId, rect ->
-                                val pkg = boostedAppsCatalog.firstOrNull { it.id == appId }?.packageName
-                                deviceAppsController.openSystemAppDetails(pkg)
+                                deviceAppsController.openSystemAppDetails(boostedAppsCatalog.firstOrNull { it.id == appId })
                             },
                             onUninstallApp = { appId ->
-                                val pkg = boostedAppsCatalog.firstOrNull { it.id == appId }?.packageName
-                                val uri = AllAppsCatalogSorter.buildUninstallUri(pkg)
-                                if (uri != null) {
-                                    runCatching {
-                                        context.startActivity(
-                                            Intent(Intent.ACTION_DELETE, Uri.parse(uri)).apply {
-                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            }
-                                        )
-                                    }
-                                }
+                                deviceAppsController.requestUninstall(boostedAppsCatalog.firstOrNull { it.id == appId })
                             },
                         )
                     }
@@ -1016,10 +1088,7 @@ fun CanopyLauncherApp(
                         },
                         onShowInfo = { tile, rectDp ->
                             contextMenu = null
-                            val appPkg = tile.appId?.let { id ->
-                                liveAppsCatalog.firstOrNull { it.id == id }?.packageName
-                            }
-                            deviceAppsController.openSystemAppDetails(appPkg)
+                            deviceAppsController.openSystemAppDetails(tile.appId?.let { id -> liveAppsCatalog.firstOrNull { it.id == id } })
                         },
                         onShortcutAction = { label, tile, rectDp ->
                             val ctxPageId = menu.pageId
@@ -1035,11 +1104,23 @@ fun CanopyLauncherApp(
                                 TileShortcutLabels.NEW_EVENT -> SystemIntents.insertCalendarEvent(context)
                                 TileShortcutLabels.OPEN_CALENDAR -> SystemIntents.openCalendarToday(context)
                                 TileShortcutLabels.CHOOSE_PHOTO -> SystemIntents.openGallery(context)
+                                TileShortcutLabels.RECONFIGURE_WIDGET -> {
+                                    val wid = tile.androidAppWidgetId
+                                    val activity = context as? Activity
+                                    if (wid != null && activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                        runCatching { appWidgetHost?.startAppWidgetConfigureActivityForResult(activity, wid, 0, 0xC0F, null) }
+                                            .onFailure { statusToast = "Dieses Widget lässt sich nicht neu einrichten." }
+                                    }
+                                }
                                 TileShortcutLabels.CHOOSE_LOCATION,
                                 TileShortcutLabels.EDIT_ENTRIES,
                                 TileShortcutLabels.CHECK_ALL -> openTileTarget(tile, ctxPageId, ctxLeafId, rectDp, label)
                                 else -> if (tile.appId != null && label.startsWith(InstalledAppsMapper.NATIVE_SHORTCUT_PREFIX)) {
-                                    openAppWithBadgeSync(tile.appId, rectDp, label)
+                                    // Menu rects are in dp; launches expect root pixels.
+                                    val rectPx = with(density) {
+                                        Rect(rectDp.left.dp.toPx(), rectDp.top.dp.toPx(), rectDp.right.dp.toPx(), rectDp.bottom.dp.toPx())
+                                    }
+                                    openAppWithBadgeSync(tile.appId, rectPx, label)
                                 }
                             }
                         },
@@ -1088,7 +1169,7 @@ fun CanopyLauncherApp(
                 if (showSearch) {
                     UniversalSearchOverlay(
                         theme = theme,
-                        allAppsCatalog = boostedAppsCatalog,
+                        allAppsCatalog = visibleAppsCatalog,
                         contactsCatalog = deviceContacts,
                         hapticsEnabled = motionSettings.hapticsEnabled,
                         onClose = { showSearch = false },
@@ -1131,7 +1212,7 @@ fun CanopyLauncherApp(
                     TileCatalogSheet(
                         theme = theme,
                         hapticsEnabled = motionSettings.hapticsEnabled,
-                        appsCatalog = boostedAppsCatalog,
+                        appsCatalog = visibleAppsCatalog,
                         nativeWidgetProviders = nativeWidgetProviders,
                         onClose = { showCatalog = false },
                         onSelectTile = { tile ->
@@ -1270,6 +1351,9 @@ fun CanopyLauncherApp(
                     developerMode = developerMode,
                     lockPortrait = lockPortrait,
                     onChangeLockPortrait = { lockPortrait = it },
+                    hiddenApps = hiddenAppIds.map { id -> id to (boostedAppsCatalog.firstOrNull { it.id == id }?.name ?: id) }
+                        .sortedBy { it.second.lowercase() },
+                    onUnhideApp = { id -> hiddenAppIds = hiddenAppIds - id },
                     versionLabel = BuildConfig.VERSION_NAME,
                     onUnlockDeveloperMode = {
                         developerMode = true
@@ -1348,6 +1432,17 @@ fun CanopyLauncherApp(
                     },
                 )
 
+                // The start page's first app group ("Favoriten" in the default layout).
+                val favoritesGroup = remember(pages, homePageId) {
+                    val ordered = pages.sortedByDescending { it.id == homePageId }
+                    ordered.firstNotNullOfOrNull { p ->
+                        TilingEngine.collectLeaves(p.root)
+                            .firstOrNull { it.tile.type == TileType.APP_GROUP && it.tile.title == "Favoriten" }
+                            ?.let { p.id to it }
+                    } ?: pages.firstOrNull { it.id == homePageId }?.let { p ->
+                        TilingEngine.collectLeaves(p.root).firstOrNull { it.tile.type == TileType.APP_GROUP }?.let { p.id to it }
+                    }
+                }
                 if (showSetupOverlay) {
                     OnboardingSetupOverlay(
                         status = onboardingStatus,
@@ -1379,6 +1474,18 @@ fun CanopyLauncherApp(
                             onboardingCompleted = true
                             showSetupOverlay = false
                         },
+                        apps = visibleAppsCatalog,
+                        favoriteAppIds = favoritesGroup?.second?.tile?.appIds.orEmpty(),
+                        onChangeFavorites = { ids ->
+                            val target = favoritesGroup
+                            if (target != null) {
+                                pages = pages.map { p ->
+                                    if (p.id == target.first) {
+                                        p.copy(root = TilingEngine.updateLeafTile(p.root, target.second.id) { it.copy(appIds = ids) })
+                                    } else p
+                                }
+                            }
+                        },
                     )
                 }
 
@@ -1393,6 +1500,55 @@ fun CanopyLauncherApp(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(top = (statusBarH + 8).dp, end = 12.dp),
+                    )
+                }
+
+                renameAppId?.let { id ->
+                    val app = liveAppsCatalog.firstOrNull { it.id == id }
+                    RenameDialog(
+                        title = "App umbenennen",
+                        initial = appLabelOverrides[id] ?: app?.name.orEmpty(),
+                        originalName = app?.name.orEmpty(),
+                        onConfirm = { newName ->
+                            val clean = newName.trim()
+                            appLabelOverrides = if (clean.isEmpty() || clean == app?.name) {
+                                appLabelOverrides - id
+                            } else {
+                                appLabelOverrides + (id to clean)
+                            }
+                            renameAppId = null
+                        },
+                        onDismiss = { renameAppId = null },
+                    )
+                }
+
+                pinAppId?.let { id ->
+                    val app = boostedAppsCatalog.firstOrNull { it.id == id }
+                    val targets = pages.filter { it.kind != PageKind.ALL_APPS }
+                    PagePickerDialog(
+                        title = "„${app?.name.orEmpty()}“ hinzufügen zu …",
+                        pages = targets,
+                        homePageId = homePageId,
+                        onPick = { target ->
+                            pinAppId = null
+                            if (app != null) {
+                                val tile = TileData(
+                                    id = TilingEngine.createNodeId("pin"),
+                                    type = TileType.SINGLE_APP,
+                                    title = app.name,
+                                    appId = app.id,
+                                    accentHue = app.hue,
+                                )
+                                updatePagesWithHistory(
+                                    pages.map { p ->
+                                        if (p.id == target.id) CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, tile, pageBoundsDp, gapDp) else p
+                                    }
+                                )
+                                CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
+                                snapToPage(pages.indexOfFirst { it.id == target.id }.coerceAtLeast(0), 0f)
+                            }
+                        },
+                        onDismiss = { pinAppId = null },
                     )
                 }
 

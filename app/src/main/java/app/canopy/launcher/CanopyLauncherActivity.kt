@@ -19,8 +19,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 class CanopyLauncherActivity : ComponentActivity() {
     private val homeIntentCounter = MutableStateFlow(0L)
+    /** Whether the last Home press came back from another app (launcher was not visible). */
+    private val homeFromAppFlag = MutableStateFlow(false)
+    private var stoppedSinceLastHome = true
     private val launcherViewModel: LauncherViewModel by viewModels()
     private val services get() = (application as CanopyApplication).services
+
+    override fun onResume() {
+        super.onResume()
+        stoppedSinceLastHome = false
+    }
 
     override fun onStart() {
         super.onStart()
@@ -30,6 +38,7 @@ class CanopyLauncherActivity : ComponentActivity() {
     override fun onStop() {
         // Persist immediately when leaving home and release sensors, callbacks and widget updates.
         launcherViewModel.flush()
+        stoppedSinceLastHome = true
         services.onLauncherStopped()
         super.onStop()
     }
@@ -39,8 +48,10 @@ class CanopyLauncherActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val homeSignal by homeIntentCounter.collectAsState()
+            val homeFromApp by homeFromAppFlag.collectAsState()
             CanopyLauncherApp(
                 homeIntentSignal = homeSignal,
+                homeFromApp = homeFromApp,
                 onSystemBarAppearance = { useLightIcons ->
                     val controller = WindowCompat.getInsetsController(window, window.decorView)
                     controller.isAppearanceLightStatusBars = !useLightIcons
@@ -54,6 +65,8 @@ class CanopyLauncherActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (LayoutBackupEngine.isHomeIntent(intent.action, intent.categories)) {
+            homeFromAppFlag.value = stoppedSinceLastHome
+            stoppedSinceLastHome = false
             homeIntentCounter.value += 1L
         }
     }

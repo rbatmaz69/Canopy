@@ -34,6 +34,10 @@ data class PersistedLauncherState(
     val lockPortrait: Boolean = true,
     /** A place picked via city search; takes precedence over [weatherCityId] presets. */
     val weatherLocation: WeatherLocation? = null,
+    /** Apps hidden from All Apps and search (still usable from existing tiles). */
+    val hiddenAppIds: Set<String> = emptySet(),
+    /** User-chosen app names, keyed by app id. */
+    val appLabelOverrides: Map<String, String> = emptyMap(),
 ) {
     companion object {
         const val CURRENT_SCHEMA_VERSION = 3

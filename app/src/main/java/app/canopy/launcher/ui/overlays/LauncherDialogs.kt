@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,4 +77,63 @@ fun LauncherStatusToast(message: String?, modifier: Modifier = Modifier) {
                 .semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+}
+
+/** Single text field dialog (rename app, …). Leaving it empty restores [originalName]. */
+@Composable
+fun RenameDialog(
+    title: String,
+    initial: String,
+    originalName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                placeholder = { Text(originalName) },
+                supportingText = { Text("Leer lassen für den Originalnamen") },
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("Speichern", fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
+}
+
+/** Lets the user choose which page receives a new tile. */
+@Composable
+fun PagePickerDialog(
+    title: String,
+    pages: List<app.canopy.launcher.layout.LauncherPage>,
+    homePageId: String,
+    onPick: (app.canopy.launcher.layout.LauncherPage) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                pages.forEach { page ->
+                    TextButton(
+                        onClick = { onPick(page) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = if (page.id == homePageId) "${page.title} (Startseite)" else page.title,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }

@@ -14,6 +14,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -171,6 +176,7 @@ private fun AllAppsLongPressActionBar(
     onDismiss: () -> Unit,
 ) {
     val canUninstall = AllAppsCatalogSorter.buildUninstallUri(app.packageName) != null
+    val management = LocalAppManagement.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -191,13 +197,25 @@ private fun AllAppsLongPressActionBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).padding(end = 4.dp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            AllAppsActionChip(icon = Icons.Rounded.PushPin, label = "Startseite", props = props) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AllAppsActionChip(icon = Icons.Rounded.PushPin, label = "Zu Seite", props = props) {
                 props.onPinAppToHome(app.id)
                 onDismiss()
             }
             AllAppsActionChip(icon = Icons.Rounded.Info, label = "Info", props = props) {
                 props.onShowAppDetails(app.id, itemRect)
+                onDismiss()
+            }
+            AllAppsActionChip(icon = Icons.Rounded.Edit, label = "Umbenennen", props = props) {
+                management.onRenameApp(app.id)
+                onDismiss()
+            }
+            AllAppsActionChip(icon = Icons.Rounded.VisibilityOff, label = "Ausblenden", props = props) {
+                management.onHideApp(app.id)
                 onDismiss()
             }
             if (canUninstall) {
@@ -231,12 +249,13 @@ private fun AllAppsActionChip(
             .clip(CircleShape)
             .background(props.surface.backgroundStart.copy(alpha = 0.85f))
             .clickable { onClick() }
-            .padding(horizontal = 7.dp, vertical = 4.dp),
+            .defaultMinSize(minHeight = 36.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Icon(icon, contentDescription = label, tint = props.surface.accentColor, modifier = Modifier.size(12.dp))
-        Text(label, color = props.surface.textPrimary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        Icon(icon, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(14.dp))
+        Text(label, color = props.surface.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -344,7 +363,10 @@ fun AllAppsBoxTile(
     props: TileContentProps,
     onLetterTick: (String) -> Unit = {},
 ) {
-    val catalog = props.allAppsCatalog
+    val management = LocalAppManagement.current
+    val catalog = remember(props.allAppsCatalog, management.hiddenAppIds) {
+        props.allAppsCatalog.filterNot { it.id in management.hiddenAppIds }
+    }
     var sortMode by remember { mutableStateOf(AllAppsSortMode.A_Z) }
     var activeLetter by remember { mutableStateOf<String?>(null) }
     var lastHapticLetter by remember { mutableStateOf<String?>(null) }
@@ -465,6 +487,7 @@ fun AllAppsBoxTile(
                                 size = 44.dp,
                                 badge = app.badge,
                                 isNew = app.isNew,
+                                contentLabel = app.name,
                             )
                             Text(
                                 text = app.name,
@@ -475,6 +498,28 @@ fun AllAppsBoxTile(
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center,
                             )
+                        }
+                    }
+                }
+                if (management.privateSpaceLocked) {
+                    item(key = "private-space", span = { GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(props.surface.accentBg)
+                                .clickable(enabled = !props.isEditMode) { management.onUnlockPrivateSpace() }
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Icons.Rounded.Lock, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(18.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Privater Bereich", color = props.surface.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("Gesperrt · Tippen zum Entsperren", color = props.surface.textSecondary, fontSize = 11.sp)
+                            }
                         }
                     }
                 }

@@ -139,6 +139,7 @@ object TileShortcutLabels {
     const val EDIT_ENTRIES = "Einträge bearbeiten"
     const val CHECK_ALL = "Alle abhaken"
     const val CHOOSE_PHOTO = "Foto öffnen"
+    const val RECONFIGURE_WIDGET = "Widget einrichten"
 }
 
 
@@ -209,6 +210,7 @@ object ContextMenuPositioner {
             TileType.APP_GROUP -> listOf(TileShortcutLabels.RENAME_GROUP, TileShortcutLabels.MANAGE_GROUP)
             TileType.REMINDERS, TileType.NOTE -> listOf(TileShortcutLabels.EDIT_ENTRIES, TileShortcutLabels.CHECK_ALL)
             TileType.PHOTOS -> listOf(TileShortcutLabels.CHOOSE_PHOTO)
+            TileType.THIRD_PARTY_WIDGET -> if (tile.androidAppWidgetId != null) listOf(TileShortcutLabels.RECONFIGURE_WIDGET) else emptyList()
             else -> emptyList()
         }
         return InstalledAppsMapper.mergeContextShortcuts(base, nativeShortcuts)

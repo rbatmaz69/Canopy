@@ -59,6 +59,10 @@ import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.system.LocalHardwareTelemetry
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import java.util.Locale
+import android.os.Build
+import android.util.SizeF
+import android.view.ViewGroup
+import androidx.compose.foundation.layout.BoxWithConstraints
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -74,6 +78,24 @@ data class WidgetSizeRangeDp(
     val maxWidthDp: Int,
     val maxHeightDp: Int,
 )
+
+/** Tells an AppWidgetHostView its real size (Android 12+ exact sizes, legacy min/max otherwise). */
+object WidgetSizing {
+    fun applySize(view: AppWidgetHostView, widthDp: Float, heightDp: Float) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                view.updateAppWidgetSize(Bundle(), listOf(SizeF(widthDp, heightDp)))
+            } else {
+                @Suppress("DEPRECATION")
+                view.updateAppWidgetSize(
+                    Bundle.EMPTY,
+                    widthDp.roundToInt(), heightDp.roundToInt(),
+                    widthDp.roundToInt(), heightDp.roundToInt(),
+                )
+            }
+        }
+    }
+}
 
 object WidgetFrameEngine {
     const val PASSEPARTOUT_MARGIN_DP = 10f
@@ -281,31 +303,24 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
             }
 
             if (hostView != null) {
-                LaunchedEffect(hostView, props.widthDp, props.heightDp, fixedW, fixedH) {
-                    val ranges = WidgetFrameEngine.computeWidgetSizeBundleRanges(
-                        tileWidthDp = props.widthDp,
-                        tileHeightDp = props.heightDp,
-                        fixedWidthDp = fixedW,
-                        fixedHeightDp = fixedH,
-                    )
-                    runCatching {
-                        @Suppress("DEPRECATION")
-                        hostView.updateAppWidgetSize(
-                            Bundle.EMPTY,
-                            ranges.minWidthDp,
-                            ranges.minHeightDp,
-                            ranges.maxWidthDp,
-                            ranges.maxHeightDp,
-                        )
+                // The widget gets the real tile size (no scaling), and the provider is told the
+                // exact size so it can pick the right responsive layout.
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val wDp = maxWidth.value
+                    val hDp = maxHeight.value
+                    LaunchedEffect(hostView, wDp.roundToInt(), hDp.roundToInt()) {
+                        WidgetSizing.applySize(hostView, wDp, hDp)
                     }
+                    AndroidView(
+                        factory = {
+                            (hostView.parent as? ViewGroup)?.removeView(hostView)
+                            hostView
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp)),
+                    )
                 }
-                AndroidView(
-                    factory = { hostView },
-                    modifier = Modifier
-                        .size(width = fixedW.dp, height = fixedH.dp)
-                        .graphicsLayer { scaleX = fitScale; scaleY = fitScale }
-                        .clip(RoundedCornerShape(16.dp)),
-                )
             } else {
                 Column(
                     modifier = Modifier

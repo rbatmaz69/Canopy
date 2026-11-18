@@ -111,6 +111,8 @@ fun DeveloperMenuSheet(
     developerMode: Boolean = false,
     lockPortrait: Boolean = true,
     onChangeLockPortrait: (Boolean) -> Unit = {},
+    hiddenApps: List<Pair<String, String>> = emptyList(),
+    onUnhideApp: (String) -> Unit = {},
     versionLabel: String = "",
     onUnlockDeveloperMode: () -> Unit = {},
 ) {
@@ -387,6 +389,35 @@ fun DeveloperMenuSheet(
             }
 
             // System-Launcher & JSON Layout-Backup
+            if (hiddenApps.isNotEmpty()) {
+                DevSection(label = "Ausgeblendete Apps") {
+                    hiddenApps.forEach { (id, name) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x0DFFFFFF))
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(name, color = Color(0xFFF8FAFC), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                text = "Einblenden",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onUnhideApp(id) }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
             DevSection(label = "Launcher & Sicherung") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     DevToggleBtn(

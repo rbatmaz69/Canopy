@@ -114,7 +114,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.canopy.launcher.data.ColorMode
 import app.canopy.launcher.data.ThemeVariantId
-import app.canopy.launcher.system.InstalledAppIconCache
+import app.canopy.launcher.system.AppIconRepository
+import app.canopy.launcher.system.AdaptiveIconGeometry
+import app.canopy.launcher.ui.tiles.AppIdentity
+import androidx.compose.material.icons.rounded.Work
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.fillMaxSize
 import app.canopy.launcher.system.InstalledAppsMapper
 import app.canopy.launcher.ui.theme.CanopyThemes
 
@@ -293,6 +301,8 @@ fun AppSquircleIcon(
     badge: Int? = null,
     isNew: Boolean = false,
     onClick: ((androidx.compose.ui.geometry.Rect?) -> Unit)? = null,
+    /** Accessible name (the app label). Falls back to the icon key. */
+    contentLabel: String? = null,
 ) {
     val iconStyle = LocalIconStyle.current
     val resolved = AppIconRegistry.resolveSquircleColors(color, iconStyle)
@@ -333,29 +343,58 @@ fun AppSquircleIcon(
             contentAlignment = Alignment.Center,
         ) {
             val context = LocalContext.current
-            val nativePkg = InstalledAppsMapper.extractPackageFromAppId(appId)
-            val nativeBitmap = remember(nativePkg) {
-                nativePkg?.let { InstalledAppIconCache.getOrLoad(context, it) }
+            val densityPx = with(LocalDensity.current) { size.roundToPx() }
+            val sizePx = AdaptiveIconGeometry.bucket(densityPx)
+            val iconVersion by AppIconRepository.version.collectAsState()
+            val loaded by produceState(AppIconRepository.cached(appId, sizePx), appId, sizePx, iconVersion) {
+                value = AppIconRepository.load(context, appId, sizePx)
             }
-            if (nativeBitmap != null) {
-                Image(
-                    bitmap = nativeBitmap,
-                    contentDescription = iconKey,
-                    contentScale = ContentScale.Crop,
-                    colorFilter = if (iconStyle.tonalIcons) {
-                        ColorFilter.tint(resolved.glyphColor, BlendMode.Modulate)
-                    } else null,
-                    modifier = Modifier
-                        .size(size * 0.66f)
-                        .clip(RoundedCornerShape(cornerRadius * 0.72f)),
+            val icon = loaded
+            val label = contentLabel ?: iconKey
+            when {
+                // Themed icon: the app's own monochrome layer on Canopy's tonal surface.
+                icon != null && iconStyle.tonalIcons && icon.monochrome != null -> Image(
+                    bitmap = icon.monochrome,
+                    contentDescription = label,
+                    colorFilter = ColorFilter.tint(resolved.glyphColor),
+                    modifier = Modifier.fillMaxSize(),
                 )
-            } else {
-                Icon(
+                // Adaptive icon: full-bleed layers, the squircle clip is the only mask.
+                icon != null && icon.isAdaptive -> Image(
+                    bitmap = icon.full,
+                    contentDescription = label,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // Legacy (non-adaptive) icon: drawn as-is with breathing room.
+                icon != null -> Image(
+                    bitmap = icon.full,
+                    contentDescription = label,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(size * 0.78f),
+                )
+                else -> Icon(
                     imageVector = AppIconRegistry.resolveIcon(iconKey),
-                    contentDescription = iconKey,
+                    contentDescription = label,
                     tint = resolved.glyphColor,
                     modifier = Modifier.size(glyphSize),
                 )
+            }
+        }
+
+        if (AppIdentity.userSerialOf(appId) != 0L) {
+            // Work / private-space apps get a small profile badge, like the system launcher.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 3.dp, y = 3.dp)
+                    .size((size.value * 0.36f).coerceIn(14f, 20f).dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF1D4ED8))
+                    .border(1.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Work, contentDescription = "Arbeitsprofil", tint = Color.White, modifier = Modifier.fillMaxSize(0.62f))
             }
         }
 

@@ -58,6 +58,16 @@ class LauncherServices(context: Context) {
 
     private var started = false
 
+    init {
+        // Drop cached icons and refresh widget providers whenever an app is installed/updated.
+        appScope.launch {
+            deviceApps.packageChanged.collect { pkg ->
+                AppIconRepository.invalidatePackage(pkg)
+                refreshWidgetProviders()
+            }
+        }
+    }
+
     /** Called from Activity.onStart: the launcher is visible, live data sources may run. */
     fun onLauncherStarted() {
         if (started) return

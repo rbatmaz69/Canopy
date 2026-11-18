@@ -36,7 +36,52 @@ data class AppDefinition(
     val isNew: Boolean = false,
     val packageName: String? = null,
     val componentActivityName: String? = null,
+    /** Which Android profile the app belongs to (personal, work, private space). */
+    val profile: AppProfile = AppProfile.PERSONAL,
+    /** UserManager serial of the owning profile; 0 for the personal profile. */
+    val userSerial: Long = 0L,
+    /** Work apps are paused (quiet mode): shown greyed out, tapping offers to resume. */
+    val isPaused: Boolean = false,
+) {
+    /** Key used to match notifications/badges: package + profile. */
+    val badgeKey: String get() = AppIdentity.badgeKey(packageName.orEmpty(), userSerial)
+}
+
+enum class AppProfile { PERSONAL, WORK, PRIVATE }
+
+/** App management hooks for All Apps (hide, rename, private space) without threading params through every tile. */
+data class AppManagementActions(
+    val hiddenAppIds: Set<String> = emptySet(),
+    val privateSpaceLocked: Boolean = false,
+    val onHideApp: (appId: String) -> Unit = {},
+    val onRenameApp: (appId: String) -> Unit = {},
+    val onUnlockPrivateSpace: () -> Unit = {},
 )
+
+val LocalAppManagement = androidx.compose.runtime.staticCompositionLocalOf { AppManagementActions() }
+
+/**
+ * Stable app ids. Personal-profile apps keep the historic `pkg:<package>` id for their main
+ * launcher activity, so existing layouts stay valid. Additional launcher activities of the same
+ * package get `/<activity>`, apps from other profiles get `@<userSerial>`.
+ */
+object AppIdentity {
+    fun appId(packageName: String, activityName: String?, isMainActivity: Boolean, userSerial: Long): String {
+        val base = if (isMainActivity || activityName.isNullOrBlank()) "pkg:$packageName" else "pkg:$packageName/$activityName"
+        return if (userSerial == 0L) base else "$base@$userSerial"
+    }
+
+    fun badgeKey(packageName: String, userSerial: Long): String =
+        if (userSerial == 0L) "pkg:$packageName" else "pkg:$packageName@$userSerial"
+
+    fun packageOf(appId: String?): String? {
+        if (appId == null || !appId.startsWith("pkg:")) return null
+        return appId.removePrefix("pkg:").substringBefore('@').substringBefore('/').trim().takeIf { it.isNotEmpty() }
+    }
+
+    fun userSerialOf(appId: String?): Long =
+        appId?.substringAfter('@', "")?.toLongOrNull() ?: 0L
+}
 
 @Immutable
 data class ContactItem(

@@ -151,6 +151,22 @@ object CatalogAndPageManager {
         ),
     )
 
+    /** Group suggestions built from the installed apps (one per category with at least two apps). */
+    fun buildGroupTemplates(apps: List<AppDefinition>): List<TileData> =
+        apps.groupBy { it.category }
+            .filterValues { it.size >= 2 }
+            .entries
+            .sortedByDescending { it.value.size }
+            .map { (category, members) ->
+                TileData(
+                    id = "cat-g-${category.name.lowercase()}",
+                    type = TileType.APP_GROUP,
+                    title = category.label,
+                    accentHue = members.first().hue,
+                    appIds = members.sortedByDescending { it.usageScore }.take(8).map { it.id },
+                )
+            }
+
     fun insertCatalogTileIntoLargestLeaf(
         page: LauncherPage,
         newTile: TileData,
@@ -570,6 +586,22 @@ fun TileCatalogSheet(
                 }
             }
 
+            var appQuery by remember { mutableStateOf("") }
+            val shownApps = remember(appsCatalog, appQuery) {
+                if (appQuery.isBlank()) appsCatalog.sortedBy { it.name.lowercase() }
+                else UniversalSearchEngine.rankApps(appsCatalog, appQuery, limit = 200)
+            }
+            val groupTemplates = remember(appsCatalog) { CatalogAndPageManager.buildGroupTemplates(appsCatalog) }
+            if (activeTab == CatalogTab.APPS) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = appQuery,
+                    onValueChange = { appQuery = it },
+                    singleLine = true,
+                    placeholder = { Text("App suchen (${appsCatalog.size})") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                )
+            }
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(if (activeTab == CatalogTab.APPS) 3 else 2),
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -661,7 +693,7 @@ fun TileCatalogSheet(
                     }
 
                     CatalogTab.APPS -> {
-                        items(appsCatalog.take(36), key = { it.id }) { app ->
+                        items(shownApps, key = { it.id }) { app ->
                             val template = TileData(
                                 id = "cat-app-${app.id}",
                                 type = TileType.SINGLE_APP,
@@ -690,7 +722,7 @@ fun TileCatalogSheet(
                     }
 
                     CatalogTab.GRUPPEN -> {
-                        items(CatalogAndPageManager.GROUP_TEMPLATES, key = { it.id }) { grp ->
+                        items(groupTemplates, key = { it.id }) { grp ->
                             val surf = theme.getTileSurface(grp.accentHue, SurfaceEmphasis.NORMAL)
                             CatalogDraggableCard(
                                 tileTemplate = grp,

@@ -64,6 +64,7 @@ import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.motion.HapticVisualFeedbackLayer
 import app.canopy.launcher.motion.SpringRole
 import app.canopy.launcher.system.DeviceAppsController
+import app.canopy.launcher.system.HomeRoleAndBackupController
 import app.canopy.launcher.system.LiveHardwareController
 import app.canopy.launcher.system.LiveMediaSessionSnapshot
 import app.canopy.launcher.system.LocalHardwareTelemetry
@@ -115,11 +116,21 @@ import kotlinx.coroutines.launch
 private const val APP_WIDGET_HOST_ID = 0xCA90
 
 @Composable
-fun CanopyLauncherApp() {
+fun CanopyLauncherApp(
+    homeIntentSignal: Long = 0L,
+) {
     val context = LocalContext.current
     val rootView = LocalView.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
+
+    val homeRoleAndBackupController = remember(context) { HomeRoleAndBackupController(context) }
+    var backupStatusMessage by remember { mutableStateOf<String?>(null) }
+    val defaultLauncherRoleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        backupStatusMessage = "Standard-Launcher-Auswahl geprüft."
+    }
 
     val deviceAppsController = remember(context) { DeviceAppsController(context) }
     DisposableEffect(deviceAppsController) {
@@ -168,23 +179,20 @@ fun CanopyLauncherApp() {
     var activePageIndex by remember { mutableIntStateOf(startIdx) }
 
     // Persist launcher state changes automatically
-    LaunchedEffect(
-        pages, homePageId, themeId, colorMode, wallpaperId, tonalIcons, shortcutBarMode, motionSettings, alarmState, useSystemWallpaper
-    ) {
-        store.save(
-            PersistedLauncherState(
-                pages = pages,
-                homePageId = homePageId,
-                themeId = themeId,
-                colorMode = colorMode,
-                wallpaperId = wallpaperId,
-                tonalIcons = tonalIcons,
-                shortcutBarMode = shortcutBarMode,
-                motionSettings = motionSettings,
-                alarmState = alarmState,
-                useSystemWallpaper = useSystemWallpaper,
-            )
-        )
+    val currentSnapshot = PersistedLauncherState(
+        pages = pages,
+        homePageId = homePageId,
+        themeId = themeId,
+        colorMode = colorMode,
+        wallpaperId = wallpaperId,
+        tonalIcons = tonalIcons,
+        shortcutBarMode = shortcutBarMode,
+        motionSettings = motionSettings,
+        alarmState = alarmState,
+        useSystemWallpaper = useSystemWallpaper,
+    )
+    LaunchedEffect(currentSnapshot) {
+        store.save(currentSnapshot)
     }
 
     // Native AppWidgetHost lifecycle
@@ -414,6 +422,22 @@ fun CanopyLauncherApp() {
             ) {
                 handleBackAction()
             } else {
+                val homeIdx = pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
+                snapToPage(homeIdx, 0f)
+            }
+        }
+
+        LaunchedEffect(homeIntentSignal) {
+            if (homeIntentSignal > 0L) {
+                fakeApp = null
+                openGroupState = null
+                contextMenu = null
+                showSearch = false
+                showCatalog = false
+                showPageOverview = false
+                showQuickShade = false
+                showDevMenu = false
+                isEditMode = false
                 val homeIdx = pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
                 snapToPage(homeIdx, 0f)
             }
@@ -953,7 +977,11 @@ fun CanopyLauncherApp() {
                     motionSettings = motionSettings,
                     showHapticHud = showHapticHud,
                     useSystemWallpaper = useSystemWallpaper,
-                    onClose = { showDevMenu = false },
+                    backupStatusMessage = backupStatusMessage,
+                    onClose = {
+                        backupStatusMessage = null
+                        showDevMenu = false
+                    },
                     onChangeThemeId = { themeId = it },
                     onChangeColorMode = { colorMode = it },
                     onChangeWallpaperId = { wallpaperId = it },
@@ -965,6 +993,38 @@ fun CanopyLauncherApp() {
                     onChangeMotionSettings = { motionSettings = it },
                     onChangeShowHapticHud = { showHapticHud = it },
                     onChangeUseSystemWallpaper = { useSystemWallpaper = it },
+                    onRequestDefaultHome = {
+                        val roleIntent = homeRoleAndBackupController.buildDefaultLauncherRoleIntent()
+                        if (roleIntent != null) {
+                            runCatching { defaultLauncherRoleLauncher.launch(roleIntent) }
+                                .onFailure { homeRoleAndBackupController.openHomeSettingsFallback() }
+                        } else {
+                            homeRoleAndBackupController.openHomeSettingsFallback()
+                        }
+                    },
+                    onExportLayoutJson = {
+                        homeRoleAndBackupController.exportToClipboardAndShare(currentSnapshot)
+                        backupStatusMessage = "Layout-JSON in Zwischenablage kopiert."
+                    },
+                    onImportLayoutJson = {
+                        homeRoleAndBackupController.importFromClipboard()
+                            .onSuccess { restored ->
+                                pages = restored.pages
+                                homePageId = restored.homePageId
+                                themeId = restored.themeId
+                                colorMode = restored.colorMode
+                                wallpaperId = restored.wallpaperId
+                                tonalIcons = restored.tonalIcons
+                                shortcutBarMode = restored.shortcutBarMode
+                                motionSettings = restored.motionSettings
+                                alarmState = restored.alarmState
+                                useSystemWallpaper = restored.useSystemWallpaper
+                                backupStatusMessage = "Layout erfolgreich importiert (${restored.pages.size} Seiten)."
+                            }
+                            .onFailure { err ->
+                                backupStatusMessage = err.message ?: "Import fehlgeschlagen."
+                            }
+                    },
                     onResetLayout = {
                         store.reset()
                         val fresh = MockCatalogData.createInitialPages(ShortcutBarMode.ALL)

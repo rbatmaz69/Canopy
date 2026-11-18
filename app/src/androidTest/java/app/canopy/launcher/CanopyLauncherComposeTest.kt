@@ -13,9 +13,8 @@ class CanopyLauncherComposeTest {
     val composeRule = createAndroidComposeRule<CanopyLauncherActivity>()
 
     @Test
-    fun launcherDisplaysStatusBarAndOpensSearchOverlayOnDockTap() {
-        composeRule.onNodeWithText("09:01").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Suche öffnen").performClick()
+    fun launcherDisplaysBottomDockAndOpensSearchOverlayOnDockTap() {
+        composeRule.onNodeWithContentDescription("Suche öffnen").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Apps, Kontakte oder Web-Suche (Enter)…").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Suche schließen").performClick()
     }

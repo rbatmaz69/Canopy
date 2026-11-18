@@ -37,7 +37,7 @@ Die native Android-Umsetzung (`app.canopy.launcher`, `minSdk = 26`, `targetSdk =
 ./gradlew testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug --no-daemon
 ```
 
-* Unit-Tests: **76 JVM-Tests** über alle 21 Test-Suiten in `app/src/test/java/app/canopy/launcher/` (Tiling-Geometrie, Snap-Physik, Hysterese, Bento-Grid, Themen, Gesten, Drag & Drop, Suche, Badges, Widgets, Geräte-App-Katalog, MediaSession/Kalender/Kontakte-Bridge & WindowInsets).
+* Unit-Tests: **83 JVM-Tests** über alle 24 Test-Suiten in `app/src/test/java/app/canopy/launcher/` (Tiling-Geometrie, Snap-Physik, Hysterese, Bento-Grid, Themen, Gesten, Drag & Drop, Suche, Badges, Widgets, Geräte-App-Katalog, MediaSession/Kalender/Kontakte-Bridge, WindowInsets, Hardware-Telemetrie, App-Icons & Home/Backup-Flow).
 * UI-Tests & CI: Instrumentierte Compose-Tests unter `app/src/androidTest/java/app/canopy/launcher/` sowie automatisierte GitHub Actions Pipeline ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 * Debug-APK: `app/build/outputs/apk/debug/app-debug.apk` (z. B. per `adb install -r app/build/outputs/apk/debug/app-debug.apk` installierbar).
 
@@ -80,7 +80,7 @@ npx vitest run
 
 ## Roadmap (Meilensteine)
 
-Alle **7 Meilensteine (`M1`–`M7`, Issues `#1`–`#21`)** der nativen Android-Umsetzung inklusive Real-Device OS Integration & CI sind abgeschlossen:
+Alle **8 Meilensteine (`M1`–`M8`, Issues `#1`–`#24`)** der nativen Android-Umsetzung inklusive Real-Device OS Integration, Hardware-Telemetrie & CI sind abgeschlossen:
 
 1. ✅ **M1:** Architektur & Tiling-Baum-Engine (Core Foundation) – `#1`–`#3`
 2. ✅ **M2:** Design-System, Themes & Adaptive Kachel-Typen – `#4`–`#6`
@@ -89,3 +89,4 @@ Alle **7 Meilensteine (`M1`–`M7`, Issues `#1`–`#21`)** der nativen Android-U
 5. ✅ **M5:** Interaktiver Bearbeiten-Modus (1D/2D-Teiler, Drag & Drop, Vorlagen) – `#13`–`#15`
 6. ✅ **M6:** Android-Systemintegration, Widgets, Suche & Release-Polishing – `#16`–`#18`
 7. ✅ **M7:** Real-Device OS Integration (`LauncherApps`, `MediaSession`, `CalendarContract`, `ContactsContract`, nativer `AppWidgetHost`-Picker, dynamische `WindowInsets`, System-Wallpaper, Compose `androidTest` & GitHub Actions CI) – `#19`–`#21`
+8. ✅ **M8:** Full Hardware, Live-Clock & Home-Role Polish (Live-Systemuhr, Tageszeit-Begrüßung, `BatteryManager`, `CameraManager`-Taschenlampe, `Sensor.TYPE_STEP_COUNTER`-Sync, native App-Icon-Bitmaps, App-Details-Intent, `HOME onNewIntent`, Standard-Launcher-Rolle, JSON Layout-Backup & R8-Regeln) – `#22`–`#24`

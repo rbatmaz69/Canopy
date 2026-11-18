@@ -23,6 +23,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Tune
@@ -66,6 +69,7 @@ fun DeveloperMenuSheet(
     motionSettings: MotionSettings,
     showHapticHud: Boolean,
     useSystemWallpaper: Boolean = false,
+    backupStatusMessage: String? = null,
     onClose: () -> Unit,
     onChangeThemeId: (ThemeVariantId) -> Unit,
     onChangeColorMode: (ColorMode) -> Unit,
@@ -75,6 +79,9 @@ fun DeveloperMenuSheet(
     onChangeMotionSettings: (MotionSettings) -> Unit,
     onChangeShowHapticHud: (Boolean) -> Unit,
     onChangeUseSystemWallpaper: (Boolean) -> Unit = {},
+    onRequestDefaultHome: () -> Unit = {},
+    onExportLayoutJson: () -> Unit = {},
+    onImportLayoutJson: () -> Unit = {},
     onResetLayout: () -> Unit,
 ) {
     if (!isOpen) return
@@ -311,6 +318,50 @@ fun DeveloperMenuSheet(
                             },
                         )
                     }
+                }
+            }
+
+            // System-Launcher & JSON Layout-Backup
+            DevSection(label = "System-Launcher & Backup") {
+                DevToggleBtn(
+                    icon = Icons.Rounded.Home,
+                    label = "Als Standard-Launcher festlegen",
+                    active = false,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
+                        onRequestDefaultHome()
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    DevToggleBtn(
+                        icon = Icons.Rounded.FileUpload,
+                        label = "JSON Export",
+                        active = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
+                            onExportLayoutJson()
+                        },
+                    )
+                    DevToggleBtn(
+                        icon = Icons.Rounded.FileDownload,
+                        label = "JSON Import",
+                        active = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
+                            onImportLayoutJson()
+                        },
+                    )
+                }
+                if (!backupStatusMessage.isNullOrBlank()) {
+                    Text(
+                        text = backupStatusMessage,
+                        color = Color(0xFF7DD3FC),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
                 }
             }
 

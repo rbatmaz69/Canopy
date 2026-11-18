@@ -336,7 +336,18 @@ fun CanopyLauncherApp(
                 hardwareController.setTorchEnabled(next.flashlight)
             }
         },
-        onChangeBrightness = { v -> systemState = systemState.copy(brightness = v.coerceIn(0.25f, 1f)) },
+        onChangeBrightness = { v ->
+            val clamped = NotificationBadgeStore.clampWindowBrightness(v)
+            systemState = systemState.copy(brightness = clamped)
+            runCatching {
+                val win = (context as? Activity)?.window
+                if (win != null) {
+                    val lp = win.attributes
+                    lp.screenBrightness = clamped
+                    win.attributes = lp
+                }
+            }
+        },
     )
 
     // Latest Haptic Event stream
@@ -828,6 +839,19 @@ fun CanopyLauncherApp(
                         onDismissNotification = { NotificationBadgeStore.dismissNotification(it) },
                         onDismissAllNotifications = { NotificationBadgeStore.dismissAll() },
                         onRestoreDemoNotifications = { NotificationBadgeStore.restoreDemoNotifications() },
+                        onLongPressToggle = { key ->
+                            showQuickShade = false
+                            val action = NotificationBadgeStore.settingsIntentForToggle(key)
+                            val launched = runCatching {
+                                context.startActivity(
+                                    Intent(action).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                )
+                                true
+                            }.getOrDefault(false)
+                            if (!launched) {
+                                openAppWithBadgeSync("app-einstellungen", null, action)
+                            }
+                        },
                     )
                 }
 

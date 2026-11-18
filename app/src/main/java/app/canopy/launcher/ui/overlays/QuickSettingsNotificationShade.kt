@@ -1,8 +1,10 @@
 package app.canopy.launcher.ui.overlays
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +70,7 @@ import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.system.LauncherNotification
 import app.canopy.launcher.system.LocalHardwareTelemetry
+import app.canopy.launcher.system.NotificationBadgeStore
 import app.canopy.launcher.ui.theme.CanopyThemes
 import app.canopy.launcher.ui.theme.ThemeTokens
 import app.canopy.launcher.ui.tiles.SystemControlState
@@ -172,6 +175,7 @@ private data class ShadeToggleSpec(
     val icon: ImageVector,
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickSettingsNotificationShade(
     theme: ThemeTokens,
@@ -184,6 +188,7 @@ fun QuickSettingsNotificationShade(
     onDismissNotification: (LauncherNotification) -> Unit,
     onDismissAllNotifications: () -> Unit,
     onRestoreDemoNotifications: () -> Unit,
+    onLongPressToggle: (SystemToggleKey) -> Unit = {},
 ) {
     val toggles = listOf(
         ShadeToggleSpec(SystemToggleKey.WIFI, "WLAN", systemState.wifi, if (systemState.wifi) Icons.Rounded.Wifi else Icons.Rounded.WifiOff),
@@ -237,10 +242,16 @@ fun QuickSettingsNotificationShade(
                                 .clip(RoundedCornerShape(15.dp))
                                 .background(if (item.active) Color(0xFF2563EB) else Color(0x1F7D7D91))
                                 .let { m -> if (item.active) m else m.border(1.dp, theme.sheetBorder, RoundedCornerShape(15.dp)) }
-                                .clickable {
-                                    CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
-                                    systemState.onToggle(item.key)
-                                }
+                                .combinedClickable(
+                                    onClick = {
+                                        CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
+                                        systemState.onToggle(item.key)
+                                    },
+                                    onLongClick = {
+                                        CanopyHaptics.trigger(HapticKind.EDIT_ENTER, hapticsEnabled)
+                                        onLongPressToggle(item.key)
+                                    },
+                                )
                                 .padding(vertical = 8.dp, horizontal = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
@@ -331,7 +342,11 @@ fun QuickSettingsNotificationShade(
                             onTap = { rect ->
                                 CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
                                 onClose()
-                                onOpenAppFromNotification(notif.appId, rect)
+                                if (!NotificationBadgeStore.triggerNotificationIntent(notif)) {
+                                    onOpenAppFromNotification(notif.appId, rect)
+                                } else {
+                                    NotificationBadgeStore.onAppOpened(notif.appId)
+                                }
                             },
                             onDismiss = {
                                 CanopyHaptics.trigger(HapticKind.TICK, hapticsEnabled)

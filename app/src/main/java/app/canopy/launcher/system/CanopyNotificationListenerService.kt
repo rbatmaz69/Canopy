@@ -1,7 +1,10 @@
 package app.canopy.launcher.system
 
+import android.app.PendingIntent
+import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import app.canopy.launcher.ui.tiles.AppDefinition
 import app.canopy.launcher.ui.tiles.SystemControlState
 import app.canopy.launcher.ui.tiles.SystemToggleKey
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +21,7 @@ data class LauncherNotification(
     val time: String,
     val hue: Float,
     val systemKey: String? = null,
+    val contentIntent: PendingIntent? = null,
 )
 
 data class NotificationSyncState(
@@ -62,14 +66,72 @@ object NotificationBadgeStore {
 
     private val _state = MutableStateFlow(NotificationSyncState())
     val state: StateFlow<NotificationSyncState> = _state.asStateFlow()
+    private var activeServiceCancelCallback: ((String) -> Unit)? = null
+
+    fun registerServiceCancelCallback(callback: ((String) -> Unit)?) {
+        activeServiceCancelCallback = callback
+    }
 
     fun dismissNotification(notif: LauncherNotification) {
+        notif.systemKey?.let { key ->
+            runCatching { activeServiceCancelCallback?.invoke(key) }
+        }
         _state.update { cur -> reduceDismissNotification(cur, notif) }
     }
 
     fun dismissAll() {
+        val currentKeys = _state.value.notifications.mapNotNull { it.systemKey }
+        currentKeys.forEach { key ->
+            runCatching { activeServiceCancelCallback?.invoke(key) }
+        }
         _state.update { cur -> reduceDismissAll(cur) }
     }
+
+    fun triggerNotificationIntent(notif: LauncherNotification): Boolean {
+        val pi = notif.contentIntent ?: return false
+        return runCatching {
+            pi.send()
+            true
+        }.getOrDefault(false)
+    }
+
+    fun resolveCanonicalAppId(
+        packageName: String,
+        catalog: List<AppDefinition> = emptyList(),
+    ): String {
+        val clean = packageName.trim()
+        if (clean.isEmpty()) return "app-nachrichten"
+        catalog.firstOrNull { it.packageName == clean }?.let { return it.id }
+        val lower = clean.lowercase()
+        when {
+            listOf("messaging", "sms", "mms", "whatsapp", "signal", "telegram", "chat").any { lower.contains(it) } -> return "app-nachrichten"
+            listOf(".gm", "gmail", "mail", "outlook", "thunderbird").any { lower.contains(it) } -> return "app-mail"
+            listOf("calendar", "kalender").any { lower.contains(it) } -> return "app-kalender"
+            listOf("dialer", "phone", "telecom").any { lower.contains(it) } -> return "app-telefon"
+            listOf("music", "spotify", "soundcloud").any { lower.contains(it) } -> return "app-musik"
+            listOf("podcast", "pocketcasts").any { lower.contains(it) } -> return "app-podcast"
+        }
+        return when (InstalledAppsMapper.inferIconKey(clean, clean)) {
+            "MessageCircle" -> "app-nachrichten"
+            "Mail" -> "app-mail"
+            "Calendar" -> "app-kalender"
+            "Phone" -> "app-telefon"
+            "Music2" -> "app-musik"
+            "Headphones" -> "app-podcast"
+            else -> "pkg:$clean"
+        }
+    }
+
+    fun settingsIntentForToggle(key: SystemToggleKey): String = when (key) {
+        SystemToggleKey.WIFI -> Settings.ACTION_WIFI_SETTINGS
+        SystemToggleKey.BLUETOOTH -> Settings.ACTION_BLUETOOTH_SETTINGS
+        SystemToggleKey.FLASHLIGHT -> Settings.ACTION_DISPLAY_SETTINGS
+        SystemToggleKey.DND -> "android.settings.ZEN_MODE_SETTINGS"
+        SystemToggleKey.HOTSPOT -> Settings.ACTION_WIRELESS_SETTINGS
+        SystemToggleKey.AUTO_ROTATE -> Settings.ACTION_DISPLAY_SETTINGS
+    }
+
+    fun clampWindowBrightness(brightness: Float): Float = brightness.coerceIn(0.25f, 1.0f)
 
     fun onAppOpened(appId: String) {
         _state.update { cur -> reduceAppOpened(cur, appId) }
@@ -139,6 +201,18 @@ object NotificationBadgeStore {
  * Android NotificationListenerService bridging live system notifications into Canopy's badge store.
  */
 class CanopyNotificationListenerService : NotificationListenerService() {
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        NotificationBadgeStore.registerServiceCancelCallback { key ->
+            runCatching { cancelNotification(key) }
+        }
+    }
+
+    override fun onListenerDisconnected() {
+        NotificationBadgeStore.registerServiceCancelCallback(null)
+        super.onListenerDisconnected()
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
@@ -150,13 +224,14 @@ class CanopyNotificationListenerService : NotificationListenerService() {
         NotificationBadgeStore.postSystemNotification(
             LauncherNotification(
                 id = "sys-${sbn.key}",
-                appId = sbn.packageName,
+                appId = NotificationBadgeStore.resolveCanonicalAppId(sbn.packageName),
                 appName = sbn.packageName.substringAfterLast('.').replaceFirstChar { it.uppercaseChar() },
                 title = title.ifBlank { sbn.packageName },
                 body = body,
                 time = "Jetzt",
-                hue = 215f,
+                hue = InstalledAppsMapper.stableHueForPackage(sbn.packageName),
                 systemKey = sbn.key,
+                contentIntent = sbn.notification?.contentIntent,
             )
         )
     }

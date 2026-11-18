@@ -19,6 +19,7 @@ data class PersistedLauncherState(
     val motionSettings: MotionSettings = MotionSettings(),
     val alarmState: AlarmState = AlarmState(),
     val useSystemWallpaper: Boolean = false,
+    val appUsageCounts: Map<String, Int> = emptyMap(),
 )
 
 interface LauncherStateStore {

@@ -165,6 +165,9 @@ fun TilingPageCanvas(
     systemState: SystemControlState,
     allAppsCatalog: List<AppDefinition>,
     modifier: Modifier = Modifier,
+    onPinAppToHome: (String) -> Unit = {},
+    onShowAppDetails: (String, Rect?) -> Unit = { _, _ -> },
+    onUninstallApp: (String) -> Unit = {},
 ) {
     val isAllApps = page.kind == PageKind.ALL_APPS
     val effectiveEdit = isEditMode && !isAllApps
@@ -325,6 +328,9 @@ fun TilingPageCanvas(
                     mediaState = mediaState,
                     systemState = systemState,
                     allAppsCatalog = allAppsCatalog,
+                    onPinAppToHome = onPinAppToHome,
+                    onShowAppDetails = onShowAppDetails,
+                    onUninstallApp = onUninstallApp,
                 )
 
                 val dropLeafTarget = activeDrop as? DropPreviewResult.LeafTarget

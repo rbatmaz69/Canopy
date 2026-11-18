@@ -63,6 +63,9 @@ fun TileRenderer(
     systemState: SystemControlState,
     allAppsCatalog: List<AppDefinition>,
     modifier: Modifier = Modifier,
+    onPinAppToHome: (String) -> Unit = {},
+    onShowAppDetails: (String, Rect?) -> Unit = { _, _ -> },
+    onUninstallApp: (String) -> Unit = {},
     bodyRenderer: @Composable (TileContentProps) -> Unit = { DefaultTileBodyRouter(it) },
 ) {
     var prevTier by remember(leafId) { mutableStateOf<TileSizeTier?>(null) }
@@ -98,6 +101,9 @@ fun TileRenderer(
         mediaState = mediaState,
         systemState = systemState,
         allAppsCatalog = allAppsCatalog,
+        onPinAppToHome = onPinAppToHome,
+        onShowAppDetails = onShowAppDetails,
+        onUninstallApp = onUninstallApp,
     )
 
     Box(

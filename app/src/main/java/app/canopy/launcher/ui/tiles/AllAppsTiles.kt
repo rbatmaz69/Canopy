@@ -2,7 +2,9 @@ package app.canopy.launcher.ui.tiles
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +30,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material3.Icon
@@ -135,6 +141,104 @@ object AllAppsCatalogSorter {
         val idx = floor(ratio * letters.size).toInt().coerceIn(0, letters.lastIndex)
         return letters[idx]
     }
+
+    fun incrementUsageCount(current: Map<String, Int>, appId: String): Map<String, Int> =
+        if (appId.isBlank()) current else current + (appId to ((current[appId] ?: 0) + 1))
+
+    fun applyUsageBoost(
+        apps: List<AppDefinition>,
+        usageCounts: Map<String, Int>,
+        pointsPerLaunch: Int = 5,
+    ): List<AppDefinition> {
+        if (usageCounts.isEmpty()) return apps
+        return apps.map { app ->
+            val count = usageCounts[app.id] ?: 0
+            if (count > 0) app.copy(usageScore = app.usageScore + count * pointsPerLaunch) else app
+        }
+    }
+
+    fun buildUninstallUri(packageName: String?): String? {
+        val clean = packageName?.trim().orEmpty()
+        if (clean.isEmpty() || clean == "app.canopy.launcher") return null
+        return "package:$clean"
+    }
+}
+
+@Composable
+private fun AllAppsLongPressActionBar(
+    app: AppDefinition,
+    itemRect: Rect?,
+    props: TileContentProps,
+    onDismiss: () -> Unit,
+) {
+    val canUninstall = AllAppsCatalogSorter.buildUninstallUri(app.packageName) != null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(props.surface.accentBg)
+            .border(1.dp, props.surface.accentColor.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = app.name,
+            color = props.surface.textPrimary,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(end = 4.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            AllAppsActionChip(icon = Icons.Rounded.PushPin, label = "Startseite", props = props) {
+                props.onPinAppToHome(app.id)
+                onDismiss()
+            }
+            AllAppsActionChip(icon = Icons.Rounded.Info, label = "Info", props = props) {
+                props.onShowAppDetails(app.id, itemRect)
+                onDismiss()
+            }
+            if (canUninstall) {
+                AllAppsActionChip(icon = Icons.Rounded.Delete, label = "Löschen", props = props) {
+                    props.onUninstallApp(app.id)
+                    onDismiss()
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .clickable { onDismiss() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Close, contentDescription = "Menü schließen", tint = props.surface.textSecondary, modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AllAppsActionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    props: TileContentProps,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(props.surface.backgroundStart.copy(alpha = 0.85f))
+            .clickable { onClick() }
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Icon(icon, contentDescription = label, tint = props.surface.accentColor, modifier = Modifier.size(12.dp))
+        Text(label, color = props.surface.textPrimary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 @Composable
@@ -171,11 +275,13 @@ fun SearchBarTile(props: TileContentProps) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NewlyInstalledTile(props: TileContentProps) {
     val appsById = props.allAppsCatalog.associateBy { it.id }.ifEmpty { MockCatalogData.APPS_BY_ID }
     val appIds = props.tile.newAppIds ?: listOf("app-skizze", "app-fokus", "app-klima")
     val apps = appIds.mapNotNull { appsById[it] }
+    var selectedActionApp by remember { mutableStateOf<Pair<AppDefinition, Rect?>?>(null) }
 
     if (props.tier == TileSizeTier.XS) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -188,6 +294,11 @@ fun NewlyInstalledTile(props: TileContentProps) {
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
+        selectedActionApp?.let { (app, rect) ->
+            AllAppsLongPressActionBar(app = app, itemRect = rect, props = props) {
+                selectedActionApp = null
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -211,7 +322,11 @@ fun NewlyInstalledTile(props: TileContentProps) {
                     modifier = Modifier
                         .defaultMinSize(minHeight = 44.dp)
                         .onGloballyPositioned { itemRect = it.boundsInRoot() }
-                        .clickable(enabled = !props.isEditMode) { props.onOpenApp(app.id, itemRect) }
+                        .combinedClickable(
+                            enabled = !props.isEditMode,
+                            onClick = { props.onOpenApp(app.id, itemRect) },
+                            onLongClick = { selectedActionApp = app to itemRect },
+                        )
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -234,6 +349,7 @@ fun AllAppsBoxTile(
     var sortMode by remember { mutableStateOf(AllAppsSortMode.A_Z) }
     var activeLetter by remember { mutableStateOf<String?>(null) }
     var lastHapticLetter by remember { mutableStateOf<String?>(null) }
+    var selectedActionApp by remember { mutableStateOf<Pair<AppDefinition, Rect?>?>(null) }
     var railHeightPx by remember { mutableFloatStateOf(1f) }
 
     val sections = remember(catalog, sortMode) {
@@ -292,6 +408,12 @@ fun AllAppsBoxTile(
             }
         }
 
+        selectedActionApp?.let { (app, rect) ->
+            AllAppsLongPressActionBar(app = app, itemRect = rect, props = props) {
+                selectedActionApp = null
+            }
+        }
+
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyVerticalGrid(
                 state = gridState,
@@ -329,7 +451,11 @@ fun AllAppsBoxTile(
                                 .animateItem()
                                 .defaultMinSize(minHeight = 44.dp)
                                 .onGloballyPositioned { itemRect = it.boundsInRoot() }
-                                .clickable(enabled = !props.isEditMode) { props.onOpenApp(app.id, itemRect) },
+                                .combinedClickable(
+                                    enabled = !props.isEditMode,
+                                    onClick = { props.onOpenApp(app.id, itemRect) },
+                                    onLongClick = { selectedActionApp = app to itemRect },
+                                ),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {

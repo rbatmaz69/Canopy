@@ -133,6 +133,9 @@ data class TileContentProps(
     val mediaState: MediaPlayerState,
     val systemState: SystemControlState,
     val allAppsCatalog: List<AppDefinition>,
+    val onPinAppToHome: (appId: String) -> Unit = {},
+    val onShowAppDetails: (appId: String, sourceRect: Rect?) -> Unit = { _, _ -> },
+    val onUninstallApp: (appId: String) -> Unit = {},
 )
 
 object TileContainerMetrics {

@@ -108,6 +108,7 @@ import app.canopy.launcher.ui.pages.UndoTileRemovalBanner
 import app.canopy.launcher.ui.theme.CanopyThemes
 import app.canopy.launcher.ui.theme.LocalCanopyTheme
 import app.canopy.launcher.ui.theme.WallpaperCanvas
+import app.canopy.launcher.ui.tiles.AllAppsCatalogSorter
 import app.canopy.launcher.ui.tiles.LocalAppWidgetHostFactory
 import app.canopy.launcher.ui.tiles.MediaPlayerState
 import app.canopy.launcher.ui.tiles.SystemControlState
@@ -168,6 +169,10 @@ fun CanopyLauncherApp(
     var motionSettings by remember { mutableStateOf(initialState.motionSettings) }
     var alarmState by remember { mutableStateOf(initialState.alarmState) }
     var useSystemWallpaper by remember { mutableStateOf(initialState.useSystemWallpaper) }
+    var appUsageCounts by remember { mutableStateOf(initialState.appUsageCounts) }
+    val boostedAppsCatalog = remember(liveAppsCatalog, appUsageCounts) {
+        AllAppsCatalogSorter.applyUsageBoost(liveAppsCatalog, appUsageCounts)
+    }
 
     var calendarEvents by remember {
         mutableStateOf(SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents()))
@@ -191,6 +196,7 @@ fun CanopyLauncherApp(
         motionSettings = motionSettings,
         alarmState = alarmState,
         useSystemWallpaper = useSystemWallpaper,
+        appUsageCounts = appUsageCounts,
     )
     LaunchedEffect(currentSnapshot) {
         store.save(currentSnapshot)
@@ -382,7 +388,8 @@ fun CanopyLauncherApp(
 
         val openAppWithBadgeSync: (String, Rect?, String?) -> Unit = { appId, sourceRect, shortcut ->
             NotificationBadgeStore.onAppOpened(appId)
-            val appDef = liveAppsCatalog.firstOrNull { it.id == appId } ?: MockCatalogData.APPS_BY_ID[appId]
+            appUsageCounts = AllAppsCatalogSorter.incrementUsageCount(appUsageCounts, appId)
+            val appDef = boostedAppsCatalog.firstOrNull { it.id == appId } ?: MockCatalogData.APPS_BY_ID[appId]
             val launchedReal = deviceAppsController.launchApp(
                 rootView = rootView,
                 appDef = appDef,
@@ -634,7 +641,49 @@ fun CanopyLauncherApp(
                             calendarEvents = calendarEvents,
                             mediaState = mediaState,
                             systemState = systemState,
-                            allAppsCatalog = liveAppsCatalog,
+                            allAppsCatalog = boostedAppsCatalog,
+                            onPinAppToHome = { appId ->
+                                val appDef = boostedAppsCatalog.firstOrNull { it.id == appId } ?: MockCatalogData.APPS_BY_ID[appId]
+                                if (appDef != null) {
+                                    val tile = TileData(
+                                        id = TilingEngine.createNodeId("pin"),
+                                        type = TileType.SINGLE_APP,
+                                        title = appDef.name,
+                                        appId = appDef.id,
+                                        accentHue = appDef.hue,
+                                    )
+                                    val targetHomeIdx = pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
+                                    val homePg = pages.getOrNull(targetHomeIdx)
+                                    if (homePg != null && homePg.kind != PageKind.ALL_APPS) {
+                                        pages = pages.map { p ->
+                                            if (p.id == homePg.id) {
+                                                CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, tile, pageBoundsDp, gapDp)
+                                            } else p
+                                        }
+                                        CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
+                                        snapToPage(targetHomeIdx, 0f)
+                                    }
+                                }
+                            },
+                            onShowAppDetails = { appId, rect ->
+                                val pkg = boostedAppsCatalog.firstOrNull { it.id == appId }?.packageName
+                                if (!deviceAppsController.openSystemAppDetails(pkg)) {
+                                    fakeApp = FakeAppTarget(FakeAppTargetKind.APP, appId = appId, sourceRect = rect, showInfoOnly = true)
+                                }
+                            },
+                            onUninstallApp = { appId ->
+                                val pkg = boostedAppsCatalog.firstOrNull { it.id == appId }?.packageName
+                                val uri = AllAppsCatalogSorter.buildUninstallUri(pkg)
+                                if (uri != null) {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_DELETE, Uri.parse(uri)).apply {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                        )
+                                    }
+                                }
+                            },
                         )
                     }
 
@@ -707,7 +756,7 @@ fun CanopyLauncherApp(
                     calendarEvents = calendarEvents,
                     mediaState = mediaState,
                     systemState = systemState,
-                    allAppsCatalog = liveAppsCatalog,
+                    allAppsCatalog = boostedAppsCatalog,
                 )
 
                 if (showQuickShade) {
@@ -834,7 +883,7 @@ fun CanopyLauncherApp(
                 if (showSearch) {
                     UniversalSearchOverlay(
                         theme = theme,
-                        allAppsCatalog = liveAppsCatalog,
+                        allAppsCatalog = boostedAppsCatalog,
                         contactsCatalog = deviceContacts,
                         hapticsEnabled = motionSettings.hapticsEnabled,
                         onClose = { showSearch = false },
@@ -884,7 +933,7 @@ fun CanopyLauncherApp(
                     TileCatalogSheet(
                         theme = theme,
                         hapticsEnabled = motionSettings.hapticsEnabled,
-                        appsCatalog = liveAppsCatalog,
+                        appsCatalog = boostedAppsCatalog,
                         nativeWidgetProviders = nativeWidgetProviders,
                         onClose = { showCatalog = false },
                         onSelectTile = { tile ->
@@ -1048,6 +1097,7 @@ fun CanopyLauncherApp(
                                 motionSettings = restored.motionSettings
                                 alarmState = restored.alarmState
                                 useSystemWallpaper = restored.useSystemWallpaper
+                                appUsageCounts = restored.appUsageCounts
                                 backupStatusMessage = "Layout erfolgreich importiert (${restored.pages.size} Seiten)."
                             }
                             .onFailure { err ->
@@ -1067,6 +1117,7 @@ fun CanopyLauncherApp(
                         motionSettings = app.canopy.launcher.data.MotionSettings()
                         alarmState = AlarmState()
                         useSystemWallpaper = false
+                        appUsageCounts = emptyMap()
                         calendarEvents = SystemTileDefaults.CALENDAR_EVENTS
                         NotificationBadgeStore.restoreDemoNotifications()
                         showDevMenu = false

@@ -157,16 +157,10 @@ fun DefaultTileBodyRouter(props: TileContentProps) {
         TileType.STEPS -> StepsTile(props)
         TileType.QUICK_TOGGLES -> QuickTogglesTile(props)
         TileType.APP_GROUP -> AppGroupTile(props)
+        TileType.SINGLE_APP -> SingleAppTile(props)
+        TileType.THIRD_PARTY_WIDGET -> ThirdPartyWidgetTile(props)
         TileType.SEARCH_BAR -> SearchBarTile(props)
         TileType.NEWLY_INSTALLED -> NewlyInstalledTile(props)
         TileType.ALL_APPS_BOX -> AllAppsBoxTile(props)
-        else -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
-            Text(
-                text = "${props.tile.title} (${props.tier})",
-                color = props.surface.textPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
     }
 }

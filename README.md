@@ -2,7 +2,7 @@
 
 **Canopy** ist ein neuartiger Android-Launcher, bei dem jede Startseite den Bildschirm **lückenlos über einen binären Teilungsbaum (Tiling Window Manager)** mit adaptiven Kacheln füllt – ganz ohne Rasterzellen, tote Ränder oder frei schwebende App-Icons.
 
-Dieses Repository enthält aktuell die **vollständige technische Spezifikation** sowie einen **vollständig interaktiven Web-Prototypen (Mockups + Layout-Engine + Gestenphysik)** als lebendige Referenz für die native Android-Umsetzung (z. B. Jetpack Compose).
+Dieses Repository enthält die **native Android-Implementierung in Kotlin + Jetpack Compose (`app/`)**, die **vollständige technische Spezifikation** (`docs/SPECIFICATION.md`) sowie den **interaktiven Web-Prototypen** (`mockups/web-prototype/`) als lebendige Referenz für Layout-Engine, Design und Gestenphysik.
 
 ---
 
@@ -26,6 +26,19 @@ Dieses Repository enthält aktuell die **vollständige technische Spezifikation*
 - **Symmetrische Bento-Gruppen & Live-Editor:** Dynamische Icon-Skalierung, `+N Alle`-Overflow, Vollbild-Gruppen-Overlay mit Inline-Umbenennung und `Apps +/−`-Verwaltung.
 - **System-Integrationen im Prototyp erlebbar:** Pull-Down Schnelleinstellungen + wegwischbare Benachrichtigungen mit Live-Badge-Synchronisation, Universal-Suche (inkl. direktem Browser-Sprung per `Enter`), kontextuelle 4. Kürzel-Reihe (`Alle | Start | Aus`) und dreiteiliges Bottom-Dock.
 - **3 Stilvarianten & 4 Farbwelten:** `Material You`, `Dunkel & kräftig`, `Glas` kombiniert mit `Sand & Bernstein`, `Nordlicht`, `Kobalt` und `Terrakotta`.
+
+---
+
+## Native Android-App bauen & testen (Kotlin + Jetpack Compose)
+
+Die native Android-Umsetzung (`app.canopy.launcher`, `minSdk = 26`, `targetSdk = 35`) deklariert `CanopyLauncherActivity` als System-Launcher (`HOME` / `DEFAULT`) sowie optional `CanopyNotificationListenerService` für Live-Benachrichtigungs-Badges:
+
+```bash
+./gradlew testDebugUnitTest assembleDebug --no-daemon
+```
+
+* Unit-Tests: **67 JVM-Tests** über alle 18 Test-Suiten in `app/src/test/java/app/canopy/launcher/` (Tiling-Geometrie, Snap-Physik, Hysterese, Bento-Grid, Themen, Gesten, Drag & Drop, Suche, Badges & Widgets).
+* Debug-APK: `app/build/outputs/apk/debug/app-debug.apk` (z. B. per `adb install -r app/build/outputs/apk/debug/app-debug.apk` installierbar).
 
 ---
 
@@ -53,6 +66,8 @@ npx vitest run
 
 ## Projektstruktur & Dokumentation
 
+- [`app/src/main/java/app/canopy/launcher/`](app/src/main/java/app/canopy/launcher) – Native Android-Implementierung (Kotlin + Jetpack Compose, Tiling-Engine, Kacheln, Gesten, Systemintegration)
+- [`app/src/test/java/app/canopy/launcher/`](app/src/test/java/app/canopy/launcher) – Native JVM-Unit-Tests für Layout-Engine, UI-Logik, Gesten & Systemintegration
 - [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md) – Vollständige Architektur-, Geometrie-, Motion- & UI-Spezifikation
 - [`docs/screenshots/`](docs/screenshots) – Aktuelle UI-Referenz-Screenshots aller Kernansichten
 - [`mockups/web-prototype/src/layout/`](mockups/web-prototype/src/layout) – Reine TypeScript Tiling-Baum-Engine + Unit-Tests (`tree.ts`, `tree.test.ts`, `types.ts`)
@@ -64,11 +79,11 @@ npx vitest run
 
 ## Roadmap (Meilensteine)
 
-Die native Umsetzung ist in **6 Meilensteine** gegliedert (siehe GitHub Milestones & Issues):
+Alle **6 Meilensteine (`M1`–`M6`, Issues `#1`–`#18`)** der nativen Android-Umsetzung sind abgeschlossen:
 
-1. **M1:** Architektur & Tiling-Baum-Engine (Core Foundation)
-2. **M2:** Design-System, Themes & Adaptive Kachel-Typen
-3. **M3:** Seiten-Architektur (Heute, Start, Medien, Apps, Alle Apps)
-4. **M4:** Gesten-Navigation, Feder-Physik, Haptik & Bottom-Dock
-5. **M5:** Interaktiver Bearbeiten-Modus (1D/2D-Teiler, Drag & Drop, Vorlagen)
-6. **M6:** Android-Systemintegration, Widgets, Suche & Release-Polishing
+1. ✅ **M1:** Architektur & Tiling-Baum-Engine (Core Foundation) – `#1`–`#3`
+2. ✅ **M2:** Design-System, Themes & Adaptive Kachel-Typen – `#4`–`#6`
+3. ✅ **M3:** Seiten-Architektur (Heute, Start, Medien, Apps, Alle Apps) – `#7`–`#9`
+4. ✅ **M4:** Gesten-Navigation, Feder-Physik, Haptik & Bottom-Dock – `#10`–`#12`
+5. ✅ **M5:** Interaktiver Bearbeiten-Modus (1D/2D-Teiler, Drag & Drop, Vorlagen) – `#13`–`#15`
+6. ✅ **M6:** Android-Systemintegration, Widgets, Suche & Release-Polishing – `#16`–`#18`

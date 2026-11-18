@@ -637,6 +637,7 @@ fun CanopyLauncherApp(
                         gestureDisabled = hasAnyOverlay || activeDrag != null,
                         onSnapToPage = snapToPage,
                         onSwipeUpSearch = { showSearch = true },
+                        onSwipeDownShade = { showQuickShade = true },
                         onPinchOverview = { showPageOverview = true },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     ) { idx, page ->

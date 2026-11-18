@@ -54,10 +54,32 @@ data class InterpolatedBounds(
     val cornerRadiusDp: Float,
 )
 
+enum class VerticalSwipeAction {
+    NONE,
+    OPEN_SEARCH,
+    OPEN_QUICK_SHADE,
+}
+
 object PagingPhysics {
     const val EDGE_RUBBERBAND_RESISTANCE = 0.30f
     const val WALLPAPER_PARALLAX_FACTOR = 0.15f
     const val FLING_VELOCITY_THRESHOLD_PX_PER_SEC = 320f
+
+    fun resolveVerticalSwipeAction(
+        totalDyPx: Float,
+        thresholdPx: Float,
+        isEditMode: Boolean,
+        pageKind: PageKind,
+    ): VerticalSwipeAction {
+        if (isEditMode || pageKind == PageKind.ALL_APPS || thresholdPx <= 0f) {
+            return VerticalSwipeAction.NONE
+        }
+        return when {
+            totalDyPx < -thresholdPx -> VerticalSwipeAction.OPEN_SEARCH
+            totalDyPx > thresholdPx -> VerticalSwipeAction.OPEN_QUICK_SHADE
+            else -> VerticalSwipeAction.NONE
+        }
+    }
 
     fun applyEdgeRubberband(
         rawOffsetPx: Float,
@@ -127,6 +149,7 @@ fun HorizontalTilingPager(
     gestureDisabled: Boolean,
     onSnapToPage: (targetIndex: Int, velocityPxPerSec: Float) -> Unit,
     onSwipeUpSearch: () -> Unit,
+    onSwipeDownShade: () -> Unit = {},
     onPinchOverview: () -> Unit,
     modifier: Modifier = Modifier,
     pageContent: @Composable (index: Int, page: LauncherPage) -> Unit,
@@ -193,9 +216,23 @@ fun HorizontalTilingPager(
                                 onSnapToPage(target, vx)
                             } else if (gestureLock == 'y') {
                                 val currentPage = pages.getOrNull(activePageIndex)
-                                if (totalDy < -swipeUpThresholdPx && !isEditMode && currentPage?.kind != PageKind.ALL_APPS) {
-                                    CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
-                                    onSwipeUpSearch()
+                                when (
+                                    PagingPhysics.resolveVerticalSwipeAction(
+                                        totalDyPx = totalDy,
+                                        thresholdPx = swipeUpThresholdPx,
+                                        isEditMode = isEditMode,
+                                        pageKind = currentPage?.kind ?: PageKind.TILES,
+                                    )
+                                ) {
+                                    VerticalSwipeAction.OPEN_SEARCH -> {
+                                        CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
+                                        onSwipeUpSearch()
+                                    }
+                                    VerticalSwipeAction.OPEN_QUICK_SHADE -> {
+                                        CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
+                                        onSwipeDownShade()
+                                    }
+                                    VerticalSwipeAction.NONE -> Unit
                                 }
                             }
                             break

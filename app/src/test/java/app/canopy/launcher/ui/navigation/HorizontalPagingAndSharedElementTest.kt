@@ -1,6 +1,7 @@
 package app.canopy.launcher.ui.navigation
 
 import androidx.compose.ui.geometry.Rect
+import app.canopy.launcher.layout.PageKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,5 +63,29 @@ class HorizontalPagingAndSharedElementTest {
         assertEquals(390f, end.widthPx, 1e-4f)
         assertEquals(844f, end.heightPx, 1e-4f)
         assertEquals(0f, end.cornerRadiusDp, 1e-4f)
+    }
+
+    @Test
+    fun `resolveVerticalSwipeAction distinguishes swipe-up search swipe-down shade and guards edit or all-apps`() {
+        assertEquals(
+            VerticalSwipeAction.OPEN_SEARCH,
+            PagingPhysics.resolveVerticalSwipeAction(-90f, 46f, isEditMode = false, pageKind = PageKind.TILES),
+        )
+        assertEquals(
+            VerticalSwipeAction.OPEN_QUICK_SHADE,
+            PagingPhysics.resolveVerticalSwipeAction(90f, 46f, isEditMode = false, pageKind = PageKind.TILES),
+        )
+        assertEquals(
+            VerticalSwipeAction.NONE,
+            PagingPhysics.resolveVerticalSwipeAction(90f, 46f, isEditMode = true, pageKind = PageKind.TILES),
+        )
+        assertEquals(
+            VerticalSwipeAction.NONE,
+            PagingPhysics.resolveVerticalSwipeAction(90f, 46f, isEditMode = false, pageKind = PageKind.ALL_APPS),
+        )
+        assertEquals(
+            VerticalSwipeAction.NONE,
+            PagingPhysics.resolveVerticalSwipeAction(20f, 46f, isEditMode = false, pageKind = PageKind.TILES),
+        )
     }
 }

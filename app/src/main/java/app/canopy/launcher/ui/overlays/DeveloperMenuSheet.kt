@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.ScreenLockPortrait
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -108,6 +109,8 @@ fun DeveloperMenuSheet(
     onImportLayoutJson: () -> Unit = {},
     onResetLayout: () -> Unit,
     developerMode: Boolean = false,
+    lockPortrait: Boolean = true,
+    onChangeLockPortrait: (Boolean) -> Unit = {},
     versionLabel: String = "",
     onUnlockDeveloperMode: () -> Unit = {},
 ) {
@@ -316,16 +319,28 @@ fun DeveloperMenuSheet(
                         onClick = { onChangeShowHapticHud(!showHapticHud) },
                     )
                 }
-                DevToggleBtn(
-                    icon = Icons.Rounded.Wallpaper,
-                    label = "System-Wallpaper: ${if (useSystemWallpaper) "An" else "Aus"}",
-                    active = useSystemWallpaper,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
-                        onChangeUseSystemWallpaper(!useSystemWallpaper)
-                    },
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    DevToggleBtn(
+                        icon = Icons.Rounded.Wallpaper,
+                        label = "System-Wallpaper: ${if (useSystemWallpaper) "An" else "Aus"}",
+                        active = useSystemWallpaper,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
+                            onChangeUseSystemWallpaper(!useSystemWallpaper)
+                        },
+                    )
+                    DevToggleBtn(
+                        icon = Icons.Rounded.ScreenLockPortrait,
+                        label = "Hochformat: ${if (lockPortrait) "Fest" else "Drehbar"}",
+                        active = lockPortrait,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
+                            onChangeLockPortrait(!lockPortrait)
+                        },
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     if (developerMode) DevToggleBtn(
                         icon = Icons.Rounded.Speed,

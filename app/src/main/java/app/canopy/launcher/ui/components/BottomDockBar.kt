@@ -94,7 +94,7 @@ fun BottomDockBar(
     pages: List<LauncherPage>,
     activePageIndex: Int,
     pageWidthPx: Float,
-    pageOffsetPx: Float,
+    pageOffsetPx: () -> Float,
     theme: ThemeTokens,
     motionSettings: MotionSettings,
     showSearchActive: Boolean,
@@ -210,7 +210,8 @@ fun PageIndicatorScrubber(
     pages: List<LauncherPage>,
     activePageIndex: Int,
     pageWidthPx: Float,
-    pageOffsetPx: Float,
+    /** Read lazily so a page swipe only recomposes the scrubber, not the whole launcher. */
+    pageOffsetPx: () -> Float,
     theme: ThemeTokens,
     motionSettings: MotionSettings,
     onSelectPage: (Int) -> Unit,
@@ -289,7 +290,7 @@ fun PageIndicatorScrubber(
         val totalW = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val count = pages.size.coerceAtLeast(1)
         val segWidthPx = totalW / count
-        val startFrac = PageScrubberMath.computeProgressStartFraction(pageOffsetPx, pageWidthPx, count)
+        val startFrac = PageScrubberMath.computeProgressStartFraction(pageOffsetPx(), pageWidthPx, count)
 
         // Subtle gliding 2dp bottom progress bar
         Box(

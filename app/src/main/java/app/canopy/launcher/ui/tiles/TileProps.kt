@@ -107,6 +107,8 @@ data class MediaPlayerState(
     val progress: Float = 0f,
     /** Package of the app owning the active media session, if any. */
     val sessionPackage: String? = null,
+    /** Raw session snapshot; tiles extrapolate live progress from it locally. */
+    val snapshot: app.canopy.launcher.system.LiveMediaSessionSnapshot? = null,
     val overrideTrack: MediaTrack? = null,
     val onTogglePlay: () -> Unit = {},
     val onPrev: () -> Unit = {},

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -19,6 +20,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
+import app.canopy.launcher.data.WeatherLocation
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -159,6 +162,51 @@ object OpenMeteoWeatherParser {
             isLiveFromNetwork = true,
         )
     }.getOrNull()
+}
+
+/** City search via the Open-Meteo geocoding API (no API key, no location permission needed). */
+object OpenMeteoGeocoder {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun parseResults(rawJson: String): List<WeatherLocation> = runCatching {
+        val results = json.parseToJsonElement(rawJson).jsonObject["results"]?.jsonArray ?: return emptyList()
+        results.mapNotNull { el ->
+            val obj = el.jsonObject
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val lat = obj["latitude"]?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+            val lon = obj["longitude"]?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+            val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "$lat,$lon"
+            val region = listOfNotNull(
+                obj["admin1"]?.jsonPrimitive?.contentOrNull,
+                obj["country"]?.jsonPrimitive?.contentOrNull,
+            ).distinct().joinToString(", ")
+            WeatherLocation(id = "geo-$id", name = name, latitude = lat, longitude = lon, region = region)
+        }
+    }.getOrDefault(emptyList())
+
+    suspend fun search(query: String, language: String = Locale.getDefault().language): List<WeatherLocation> {
+        val clean = query.trim()
+        if (clean.length < 2) return emptyList()
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val url = URL(
+                    "https://geocoding-api.open-meteo.com/v1/search?name=" +
+                        URLEncoder.encode(clean, "UTF-8") + "&count=6&format=json&language=" + language
+                )
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                }
+                try {
+                    if (conn.responseCode in 200..299) {
+                        parseResults(conn.inputStream.bufferedReader().use { it.readText() })
+                    } else emptyList()
+                } finally {
+                    conn.disconnect()
+                }
+            }.getOrDefault(emptyList())
+        }
+    }
 }
 
 /**

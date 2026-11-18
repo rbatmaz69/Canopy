@@ -31,6 +31,12 @@ import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.ui.tiles.AppCategory
 import app.canopy.launcher.ui.tiles.AppDefinition
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -303,7 +309,11 @@ object InstalledAppIconCache {
  * Runtime controller connecting Android's LauncherApps / PackageManager APIs
  * with Canopy's merged app catalog and Clip-Reveal / Shortcut execution.
  */
-class DeviceAppsController(private val context: Context) {
+class DeviceAppsController(
+    private val context: Context,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) {
+    private var refreshJob: Job? = null
     private val launcherApps: LauncherApps? = runCatching {
         context.getSystemService(LauncherApps::class.java)
     }.getOrNull()
@@ -333,7 +343,16 @@ class DeviceAppsController(private val context: Context) {
         runCatching { launcherApps?.unregisterCallback(callback) }
     }
 
+    /** Re-reads the installed apps off the main thread; bursts of package events are coalesced. */
     fun refreshInstalledApps() {
+        refreshJob?.cancel()
+        refreshJob = scope.launch(Dispatchers.IO) {
+            delay(150L)
+            loadInstalledAppsNow()
+        }
+    }
+
+    private fun loadInstalledAppsNow() {
         val nowMs = System.currentTimeMillis()
         val entries = runCatching {
             val la = launcherApps ?: return@runCatching emptyList()

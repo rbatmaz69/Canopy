@@ -61,13 +61,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import app.canopy.launcher.CanopyApplication
 import app.canopy.launcher.BuildConfig
 import androidx.compose.ui.unit.dp
 import app.canopy.launcher.data.AlarmState
 import app.canopy.launcher.data.ColorMode
 import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.data.PersistedLauncherState
-import app.canopy.launcher.data.SharedPreferencesLauncherStore
 import app.canopy.launcher.data.ShortcutBarMode
 import app.canopy.launcher.data.ThemeVariantId
 import app.canopy.launcher.layout.DropZone
@@ -145,7 +146,6 @@ import app.canopy.launcher.ui.tiles.SystemToggleKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private const val APP_WIDGET_HOST_ID = 0xCA90
 
 @Composable
 fun CanopyLauncherApp(
@@ -168,51 +168,49 @@ fun CanopyLauncherApp(
         backupStatusMessage = if (isDefaultHome) "Canopy ist als Standard-Launcher aktiv." else "Standard-Launcher-Auswahl geprüft."
     }
 
-    val deviceAppsController = remember(context) { DeviceAppsController(context) }
-    DisposableEffect(deviceAppsController) {
-        deviceAppsController.startListening()
-        onDispose { deviceAppsController.stopListening() }
-    }
+    val services = remember(context) { (context.applicationContext as CanopyApplication).services }
+    val vm: LauncherViewModel = viewModel()
+    val holder = vm.holder
+
+    val deviceAppsController = services.deviceApps
     val liveAppsCatalog by deviceAppsController.catalogFlow.collectAsState()
 
-    val hardwareController = remember(context) { LiveHardwareController(context) }
-    DisposableEffect(hardwareController) {
-        hardwareController.start()
-        onDispose { hardwareController.stop() }
-    }
+    val hardwareController = services.hardware
     val hardwareTelemetry by hardwareController.telemetryFlow.collectAsState()
 
-    val weatherController = remember(context) {
-        LiveWeatherController(context.getSharedPreferences("canopy_weather", android.content.Context.MODE_PRIVATE))
-    }
+    val weatherController = services.weather
     val weatherSnapshot by weatherController.weatherFlow.collectAsState()
 
-    val systemDataProvider = remember(context) { SystemDataProvider(context) }
-    val nativeWidgetProviders = remember(systemDataProvider) { systemDataProvider.loadInstalledWidgetProviders() }
+    val systemDataProvider = services.systemData
+    val nativeWidgetProviders by services.widgetProviders.collectAsState()
 
-    val store = remember(context) { SharedPreferencesLauncherStore(context) }
-    val initialState = remember {
-        store.load() ?: PersistedLauncherState(pages = MockCatalogData.createInitialPages(ShortcutBarMode.ALL))
-    }
-
-    var shortcutBarMode by remember { mutableStateOf(initialState.shortcutBarMode) }
-    var pages by remember { mutableStateOf(initialState.pages) }
-    var homePageId by remember { mutableStateOf(initialState.homePageId) }
-    var themeId by remember { mutableStateOf(initialState.themeId) }
-    var colorMode by remember { mutableStateOf(initialState.colorMode) }
-    var wallpaperId by remember { mutableStateOf(initialState.wallpaperId) }
-    var tonalIcons by remember { mutableStateOf(initialState.tonalIcons) }
-    var motionSettings by remember { mutableStateOf(initialState.motionSettings) }
-    var alarmState by remember { mutableStateOf(initialState.alarmState) }
-    var useSystemWallpaper by remember { mutableStateOf(initialState.useSystemWallpaper) }
-    var appUsageCounts by remember { mutableStateOf(initialState.appUsageCounts) }
-    var customCalendarEvents by remember { mutableStateOf(initialState.customCalendarEvents) }
-    var weatherCityId by remember { mutableStateOf(initialState.weatherCityId) }
-    var schemaVersion by remember { mutableIntStateOf(initialState.schemaVersion) }
-    var onboardingCompleted by remember { mutableStateOf(initialState.onboardingCompleted) }
-    var showSetupOverlay by remember { mutableStateOf(!initialState.onboardingCompleted) }
+    // Persisted model lives in the ViewModel (survives config changes, saved off the main thread).
+    var shortcutBarMode by holder.field({ it.shortcutBarMode }, { copy(shortcutBarMode = it) })
+    var pages by holder.field({ it.pages }, { copy(pages = it) })
+    var homePageId by holder.field({ it.homePageId }, { copy(homePageId = it) })
+    var themeId by holder.field({ it.themeId }, { copy(themeId = it) })
+    var colorMode by holder.field({ it.colorMode }, { copy(colorMode = it) })
+    var wallpaperId by holder.field({ it.wallpaperId }, { copy(wallpaperId = it) })
+    var tonalIcons by holder.field({ it.tonalIcons }, { copy(tonalIcons = it) })
+    var motionSettings by holder.field({ it.motionSettings }, { copy(motionSettings = it) })
+    var useSystemWallpaper by holder.field({ it.useSystemWallpaper }, { copy(useSystemWallpaper = it) })
+    var appUsageCounts by holder.field({ it.appUsageCounts }, { copy(appUsageCounts = it) })
+    var weatherCityId by holder.field({ it.weatherCityId }, { copy(weatherCityId = it) })
+    var weatherLocation by holder.field({ it.weatherLocation }, { copy(weatherLocation = it) })
+    var lockPortrait by holder.field({ it.lockPortrait }, { copy(lockPortrait = it) })
+    var onboardingCompleted by holder.field({ it.onboardingCompleted }, { copy(onboardingCompleted = it) })
+    var editHistory by holder.historyField()
+    val currentSnapshot = holder.state
+    var showSetupOverlay by remember { mutableStateOf(!holder.state.onboardingCompleted) }
     var permissionRefreshTick by remember { mutableIntStateOf(0) }
-    var didRealAppMigration by remember { mutableStateOf(initialState.schemaVersion >= PersistedLauncherState.CURRENT_SCHEMA_VERSION && store.load() != null) }
+
+    LaunchedEffect(lockPortrait) {
+        (context as? Activity)?.requestedOrientation = if (lockPortrait) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -221,6 +219,8 @@ fun CanopyLauncherApp(
                 isDefaultHome = homeRoleAndBackupController.isDefaultHome()
                 permissionRefreshTick += 1
                 hardwareController.registerStepSensorIfPermitted()
+                services.content.refreshIfNeeded()
+                services.media.start()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -231,24 +231,29 @@ fun CanopyLauncherApp(
         OnboardingPermissionsHelper.inspectStatus(context, isDefaultHome)
     }
 
-    val deviceContacts = remember(systemDataProvider, permissionRefreshTick) {
-        SystemDataAndWidgetEngine.mergeContacts(systemDataProvider.loadDeviceContacts())
-    }
+    val deviceContacts by services.content.contacts.collectAsState()
 
-    LaunchedEffect(liveAppsCatalog, didRealAppMigration) {
-        if (!didRealAppMigration && liveAppsCatalog.isNotEmpty()) {
-            pages = app.canopy.launcher.system.InstalledAppsMapper.resolveRealAppIdsForPages(liveAppsCatalog, pages)
-            schemaVersion = PersistedLauncherState.CURRENT_SCHEMA_VERSION
-            didRealAppMigration = true
+    // First run / after reset: map the template's placeholder app ids onto installed apps once.
+    var remapTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(liveAppsCatalog, remapTick) {
+        if (vm.needsRealAppRemap && liveAppsCatalog.isNotEmpty()) {
+            pages = InstalledAppsMapper.resolveRealAppIdsForPages(liveAppsCatalog, pages)
+            vm.markRealAppRemapDone()
         }
     }
 
     // Refresh the forecast when the place changes, and every 30 min while Canopy is visible.
-    LaunchedEffect(weatherController, weatherCityId) {
+    LaunchedEffect(weatherController, weatherCityId, weatherLocation) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                if (weatherController.weatherFlow.value.cityId != weatherCityId || weatherController.isStale()) {
-                    weatherController.refreshForCity(weatherCityId)
+                val place = weatherLocation
+                val wantedId = place?.id ?: weatherCityId
+                if (weatherController.weatherFlow.value.cityId != wantedId || weatherController.isStale()) {
+                    if (place != null) {
+                        weatherController.refresh(place.latitude, place.longitude, place.name, place.id)
+                    } else {
+                        weatherController.refreshForCity(weatherCityId)
+                    }
                 }
                 delay(5 * 60 * 1000L)
             }
@@ -264,45 +269,24 @@ fun CanopyLauncherApp(
             .map { app -> badgeCounts[app.id]?.let { app.copy(badge = it) } ?: app }
     }
 
-    val baseCalendarEvents = remember(systemDataProvider, permissionRefreshTick) {
-        SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents())
-    }
-    val calendarEvents = remember(customCalendarEvents, baseCalendarEvents) {
-        customCalendarEvents + baseCalendarEvents
-    }
+    val calendarEvents by services.content.calendarEvents.collectAsState()
     val startIdx = remember {
         pages.indexOfFirst { it.id == homePageId }.coerceAtLeast(0)
     }
     var activePageIndex by remember { mutableIntStateOf(startIdx) }
 
-    // Persist launcher state changes automatically
-    val currentSnapshot = PersistedLauncherState(
-        pages = pages,
-        homePageId = homePageId,
-        themeId = themeId,
-        colorMode = colorMode,
-        wallpaperId = wallpaperId,
-        tonalIcons = tonalIcons,
-        shortcutBarMode = shortcutBarMode,
-        motionSettings = motionSettings,
-        alarmState = alarmState,
-        useSystemWallpaper = useSystemWallpaper,
-        appUsageCounts = appUsageCounts,
-        customCalendarEvents = customCalendarEvents,
-        weatherCityId = weatherCityId,
-        schemaVersion = schemaVersion,
-        onboardingCompleted = onboardingCompleted,
-    )
-    LaunchedEffect(currentSnapshot) {
-        store.save(currentSnapshot)
-    }
-
-    // Native AppWidgetHost lifecycle
-    val appWidgetHost = remember(context) { runCatching { AppWidgetHost(context, APP_WIDGET_HOST_ID) }.getOrNull() }
-    val appWidgetManager = remember(context) { runCatching { AppWidgetManager.getInstance(context) }.getOrNull() }
-    DisposableEffect(appWidgetHost) {
-        runCatching { appWidgetHost?.startListening() }
-        onDispose { runCatching { appWidgetHost?.stopListening() } }
+    val appWidgetHost = services.appWidgetHost
+    val appWidgetManager = services.appWidgetManager
+    // Stable instance: a new lambda would re-provide the CompositionLocal and recreate widget views.
+    val widgetHostFactory: (Int) -> android.appwidget.AppWidgetHostView? = remember(appWidgetHost, appWidgetManager) {
+        { widgetId ->
+            val info = runCatching { appWidgetManager?.getAppWidgetInfo(widgetId) }.getOrNull()
+            if (info != null && appWidgetHost != null) {
+                runCatching { appWidgetHost.createView(context.applicationContext, widgetId, info) }.getOrNull()
+            } else {
+                null
+            }
+        }
     }
 
     // UI Overlays & Mode State
@@ -324,14 +308,8 @@ fun CanopyLauncherApp(
     var lastGroupRecordMs by remember { mutableLongStateOf(0L) }
     var undoSnapshot by remember { mutableStateOf<UndoSnapshot?>(null) }
     var activeDrag by remember { mutableStateOf<ActiveTileDrag?>(null) }
-    var editHistory by remember { mutableStateOf(EditHistoryState()) }
     var lastDividerRecordMs by remember { mutableLongStateOf(0L) }
-    val updatePagesWithHistory: (List<LauncherPage>) -> Unit = { next ->
-        if (next != pages) {
-            editHistory = editHistory.recordBeforeMutation(pages)
-            pages = next
-        }
-    }
+    val updatePagesWithHistory: (List<LauncherPage>) -> Unit = { next -> holder.updatePagesWithHistory(next) }
 
     LaunchedEffect(statusToast) {
         if (statusToast != null) {
@@ -348,42 +326,30 @@ fun CanopyLauncherApp(
         }
     }
 
-    // Media state mirrors the active MediaSession only (needs notification access).
-    var liveMediaSnapshot by remember { mutableStateOf<LiveMediaSessionSnapshot?>(null) }
-    LaunchedEffect(systemDataProvider) {
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                liveMediaSnapshot = systemDataProvider.readActiveMediaSnapshot()
-                delay(1500L)
-            }
-        }
-    }
-
+    // Media state mirrors the active MediaSession via callbacks (needs notification access).
+    val liveMediaSnapshot by services.media.snapshot.collectAsState()
     val liveMapped = remember(liveMediaSnapshot) {
         liveMediaSnapshot?.let { SystemDataAndWidgetEngine.mapMediaSnapshotToTrack(it) }
     }
-    val activeController = remember(liveMediaSnapshot?.packageName) {
-        if (liveMediaSnapshot != null) systemDataProvider.queryActiveMediaController() else null
-    }
-
     val mediaState = MediaPlayerState(
         isPlaying = liveMediaSnapshot?.isPlaying ?: false,
         progress = liveMapped?.second ?: 0f,
+        snapshot = liveMediaSnapshot,
         overrideTrack = liveMapped?.first,
         sessionPackage = liveMediaSnapshot?.packageName,
         onTogglePlay = {
             runCatching {
-                if (liveMediaSnapshot?.isPlaying == true) activeController?.transportControls?.pause()
-                else activeController?.transportControls?.play()
+                if (liveMediaSnapshot?.isPlaying == true) services.media.activeController?.transportControls?.pause()
+                else services.media.activeController?.transportControls?.play()
             }
         },
-        onPrev = { runCatching { activeController?.transportControls?.skipToPrevious() } },
-        onNext = { runCatching { activeController?.transportControls?.skipToNext() } },
+        onPrev = { runCatching { services.media.activeController?.transportControls?.skipToPrevious() } },
+        onNext = { runCatching { services.media.activeController?.transportControls?.skipToNext() } },
         onSeek = { ratio ->
             val snap = liveMediaSnapshot
             if (snap != null) {
                 val targetMs = (ratio.coerceIn(0f, 1f) * snap.durationMs.coerceAtLeast(1000L)).toLong()
-                runCatching { activeController?.transportControls?.seekTo(targetMs) }
+                runCatching { services.media.activeController?.transportControls?.seekTo(targetMs) }
             }
         },
     )
@@ -682,14 +648,7 @@ fun CanopyLauncherApp(
             LocalIconStyle provides iconStyle,
             LocalHardwareTelemetry provides hardwareTelemetry,
             LocalWeatherSnapshot provides weatherSnapshot,
-            LocalAppWidgetHostFactory provides { widgetId ->
-                val info = appWidgetManager?.getAppWidgetInfo(widgetId)
-                if (info != null && appWidgetHost != null) {
-                    appWidgetHost.createView(context, widgetId, info)
-                } else {
-                    null
-                }
-            },
+            LocalAppWidgetHostFactory provides widgetHostFactory,
         ) {
             Box(
                 modifier = Modifier
@@ -807,7 +766,7 @@ fun CanopyLauncherApp(
                             motionSettings = motionSettings,
                             isEditMode = isEditMode,
                             isActivePage = idx == activePageIndex,
-                            alarmState = alarmState,
+                            alarmState = AlarmState(),
                             activeDrag = activeDrag,
                             dropPreview = dropPreview,
                             onToggleAlarm = { SystemIntents.openAlarms(context) },
@@ -914,7 +873,7 @@ fun CanopyLauncherApp(
                         pages = pages,
                         activePageIndex = activePageIndex,
                         pageWidthPx = screenWidthPx,
-                        pageOffsetPx = pageOffsetAnim.value,
+                        pageOffsetPx = { pageOffsetAnim.value },
                         theme = theme,
                         motionSettings = motionSettings,
                         showSearchActive = showSearch,
@@ -987,7 +946,7 @@ fun CanopyLauncherApp(
                     screenOriginRootY = 0f,
                     theme = theme,
                     motionSettings = motionSettings,
-                    alarmState = alarmState,
+                    alarmState = AlarmState(),
                     calendarEvents = calendarEvents,
                     mediaState = mediaState,
                     systemState = systemState,
@@ -1286,7 +1245,12 @@ fun CanopyLauncherApp(
                             }
                         },
                         weatherCityId = weatherCityId,
-                        onSelectWeatherCity = { weatherCityId = it },
+                        onSelectWeatherCity = {
+                            weatherLocation = null
+                            weatherCityId = it
+                        },
+                        weatherLocation = weatherLocation,
+                        onSelectWeatherLocation = { weatherLocation = it },
                         onClose = { tileDetail = null },
                     )
                 }
@@ -1304,6 +1268,8 @@ fun CanopyLauncherApp(
                     showFpsHud = showFpsHud,
                     backupStatusMessage = backupStatusMessage,
                     developerMode = developerMode,
+                    lockPortrait = lockPortrait,
+                    onChangeLockPortrait = { lockPortrait = it },
                     versionLabel = BuildConfig.VERSION_NAME,
                     onUnlockDeveloperMode = {
                         developerMode = true
@@ -1354,19 +1320,8 @@ fun CanopyLauncherApp(
                             onConfirm = {
                         homeRoleAndBackupController.importFromClipboard()
                             .onSuccess { restored ->
-                                pages = restored.pages
-                                homePageId = restored.homePageId
-                                themeId = restored.themeId
-                                colorMode = restored.colorMode
-                                wallpaperId = restored.wallpaperId
-                                tonalIcons = restored.tonalIcons
-                                shortcutBarMode = restored.shortcutBarMode
-                                motionSettings = restored.motionSettings
-                                alarmState = restored.alarmState
-                                useSystemWallpaper = restored.useSystemWallpaper
-                                appUsageCounts = restored.appUsageCounts
-                                customCalendarEvents = restored.customCalendarEvents
-                                weatherCityId = restored.weatherCityId
+                                // Keep onboarding state; everything else comes from the backup.
+                                holder.replaceAll(restored.copy(onboardingCompleted = true))
                                 backupStatusMessage = "Layout erfolgreich importiert (${restored.pages.size} Seiten)."
                             }
                             .onFailure { err ->
@@ -1381,28 +1336,12 @@ fun CanopyLauncherApp(
                             message = "Alle Seiten, Kacheln und Design-Einstellungen gehen auf den Ausgangszustand zurück. Das lässt sich nicht rückgängig machen.",
                             confirmLabel = "Zurücksetzen",
                             onConfirm = {
-                        store.reset()
-                        val freshBase = MockCatalogData.createInitialPages(ShortcutBarMode.ALL)
-                        val fresh = if (liveAppsCatalog.isNotEmpty()) {
-                            app.canopy.launcher.system.InstalledAppsMapper.resolveRealAppIdsForPages(liveAppsCatalog, freshBase)
-                        } else freshBase
-                        pages = fresh
-                        shortcutBarMode = ShortcutBarMode.ALL
-                        homePageId = "page-start"
-                        themeId = ThemeVariantId.MATERIAL_YOU
-                        colorMode = ColorMode.LIGHT
-                        wallpaperId = app.canopy.launcher.data.WallpaperPresetId.SAND
-                        tonalIcons = true
-                        motionSettings = app.canopy.launcher.data.MotionSettings()
-                        alarmState = AlarmState()
-                        useSystemWallpaper = true
-                        appUsageCounts = emptyMap()
-                        customCalendarEvents = emptyList()
-                        weatherCityId = "berlin"
-                        editHistory = EditHistoryState()
+                        val fresh = vm.resetToDefaults()
+                        holder.update { it.copy(onboardingCompleted = true) }
+                        remapTick += 1
                         showDevMenu = false
                         isEditMode = false
-                        val startPageIdx = fresh.indexOfFirst { it.id == "page-start" }.coerceAtLeast(0)
+                        val startPageIdx = fresh.pages.indexOfFirst { it.id == fresh.homePageId }.coerceAtLeast(0)
                         snapToPage(startPageIdx, 0f)
                             },
                         )
@@ -1432,7 +1371,10 @@ fun CanopyLauncherApp(
                         onChangeThemeId = { themeId = it },
                         onChangeColorMode = { colorMode = it },
                         onChangeUseSystemWallpaper = { useSystemWallpaper = it },
-                        onSelectWeatherCity = { weatherCityId = it },
+                        onSelectWeatherCity = {
+                            weatherLocation = null
+                            weatherCityId = it
+                        },
                         onComplete = {
                             onboardingCompleted = true
                             showSetupOverlay = false

@@ -90,6 +90,8 @@ import app.canopy.launcher.system.InstalledAppsMapper
 import app.canopy.launcher.system.LocalWeatherSnapshot
 import app.canopy.launcher.system.NativeShortcutEntry
 import app.canopy.launcher.system.OpenMeteoWeatherParser
+import app.canopy.launcher.system.OpenMeteoGeocoder
+import app.canopy.launcher.data.WeatherLocation
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import app.canopy.launcher.ui.navigation.SharedElementExpandContainer
 import app.canopy.launcher.ui.theme.CanopyThemes
@@ -371,6 +373,8 @@ fun TileDetailOverlay(
     onUpdateTile: (pageId: String, leafId: String, updater: (TileData) -> TileData) -> Unit = { _, _, _ -> },
     weatherCityId: String,
     onSelectWeatherCity: (String) -> Unit = {},
+    weatherLocation: WeatherLocation? = null,
+    onSelectWeatherLocation: (WeatherLocation) -> Unit = {},
     onClose: () -> Unit,
 ) {
     val title = when (target.kind) {
@@ -439,6 +443,8 @@ fun TileDetailOverlay(
                     TileDetailKind.WEATHER -> WeatherTargetView(
                         weatherCityId = weatherCityId,
                         onSelectWeatherCity = onSelectWeatherCity,
+                        weatherLocation = weatherLocation,
+                        onSelectWeatherLocation = onSelectWeatherLocation,
                         fg = fg,
                         muted = muted,
                         cardBg = cardBg,
@@ -541,6 +547,8 @@ private fun NotesTargetView(
 private fun WeatherTargetView(
     weatherCityId: String,
     onSelectWeatherCity: (String) -> Unit,
+    weatherLocation: WeatherLocation?,
+    onSelectWeatherLocation: (WeatherLocation) -> Unit,
     fg: Color,
     muted: Color,
     cardBg: Color,
@@ -548,18 +556,60 @@ private fun WeatherTargetView(
     accentBg: Color,
 ) {
     val weather = LocalWeatherSnapshot.current
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<WeatherLocation>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    LaunchedEffect(query) {
+        if (query.trim().length < 2) {
+            results = emptyList()
+            return@LaunchedEffect
+        }
+        delay(350L) // debounce typing
+        searching = true
+        results = OpenMeteoGeocoder.search(query)
+        searching = false
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("ORT FÜR DIE VORHERSAGE", color = muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text(weatherLocation?.name?.let { "Aktuell: $it" } ?: "Ort suchen") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (searching) {
+            Text("Suche …", color = muted, fontSize = 12.sp)
+        } else if (query.trim().length >= 2 && results.isEmpty()) {
+            Text("Kein Ort gefunden.", color = muted, fontSize = 12.sp)
+        }
+        results.forEach { place ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        onSelectWeatherLocation(place)
+                        query = ""
+                    }
+                    .defaultMinSize(minHeight = 48.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+            ) {
+                Text(place.name, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                if (place.region.isNotBlank()) Text(place.region, color = muted, fontSize = 12.sp)
+            }
+        }
+        Text("SCHNELLAUSWAHL", color = muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             OpenMeteoWeatherParser.CITY_PRESETS.forEach { preset ->
-                val active = preset.id == weatherCityId
+                val active = weatherLocation == null && preset.id == weatherCityId
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))

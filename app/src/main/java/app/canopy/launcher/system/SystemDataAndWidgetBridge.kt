@@ -38,7 +38,19 @@ data class LiveMediaSessionSnapshot(
     val durationMs: Long,
     val positionMs: Long,
     val isPlaying: Boolean,
-)
+    /** SystemClock.elapsedRealtime() at which [positionMs] was reported. */
+    val positionUpdatedAtElapsedMs: Long = 0L,
+    val playbackSpeed: Float = 1f,
+) {
+    /** Playback progress (0..1) extrapolated to [nowElapsedMs] while playing. */
+    fun progressAt(nowElapsedMs: Long): Float {
+        val duration = max(1000L, durationMs)
+        val advanced = if (isPlaying && positionUpdatedAtElapsedMs > 0L) {
+            ((nowElapsedMs - positionUpdatedAtElapsedMs).coerceAtLeast(0L) * playbackSpeed).toLong()
+        } else 0L
+        return ((positionMs + advanced).toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+    }
+}
 
 data class NativeWidgetProviderSpec(
     val providerPackage: String,
@@ -112,7 +124,11 @@ object SystemDataAndWidgetEngine {
  * calendar events, and contacts safely with automatic demo fallback.
  */
 class SystemDataProvider(private val context: Context) {
-    private val timeFormat = SimpleDateFormat("HH:mm", Locale.GERMANY)
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+
+    companion object {
+        const val MAX_CONTACTS = 2000
+    }
 
     fun loadInstalledWidgetProviders(): List<NativeWidgetProviderSpec> {
         val manager = runCatching { AppWidgetManager.getInstance(context) }.getOrNull() ?: return emptyList()
@@ -147,6 +163,11 @@ class SystemDataProvider(private val context: Context) {
 
     fun readActiveMediaSnapshot(): LiveMediaSessionSnapshot? {
         val ctrl = queryActiveMediaController() ?: return null
+        return snapshotOf(ctrl)
+    }
+
+    /** Builds a snapshot from a specific controller (used by the callback-driven media monitor). */
+    fun snapshotOf(ctrl: MediaController): LiveMediaSessionSnapshot? {
         val meta = ctrl.metadata ?: return null
         val title = meta.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
         if (title.isBlank()) return null
@@ -164,6 +185,8 @@ class SystemDataProvider(private val context: Context) {
             durationMs = durationMs,
             positionMs = positionMs,
             isPlaying = isPlaying,
+            positionUpdatedAtElapsedMs = playback?.lastPositionUpdateTime ?: 0L,
+            playbackSpeed = playback?.playbackSpeed?.takeIf { it > 0f } ?: 1f,
         )
     }
 
@@ -251,11 +274,13 @@ class SystemDataProvider(private val context: Context) {
                 val colId = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
                 val colName = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY)
                 val colNum = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                while (cursor.moveToNext() && contacts.size < 24) {
+                val seen = HashSet<Long>()
+                while (cursor.moveToNext() && contacts.size < MAX_CONTACTS) {
                     val name = cursor.getString(colName).orEmpty().trim()
                     if (name.isBlank()) continue
                     val number = cursor.getString(colNum).orEmpty().trim()
                     val cid = cursor.getLong(colId)
+                    if (!seen.add(cid)) continue
                     contacts += ContactItem(
                         id = "contact-os-$cid",
                         name = name,

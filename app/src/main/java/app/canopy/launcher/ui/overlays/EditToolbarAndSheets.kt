@@ -83,9 +83,12 @@ import app.canopy.launcher.layout.TilingEngine
 import app.canopy.launcher.layout.WidgetKind
 import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
+import app.canopy.launcher.system.InstalledAppsMapper
+import app.canopy.launcher.system.NativeWidgetProviderSpec
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import app.canopy.launcher.ui.theme.SurfaceEmphasis
 import app.canopy.launcher.ui.theme.ThemeTokens
+import app.canopy.launcher.ui.tiles.AppDefinition
 
 enum class CatalogTab(val label: String) {
     EIGEN("Eigene Kacheln"),
@@ -383,9 +386,12 @@ private fun EditToolbarButton(
 fun TileCatalogSheet(
     theme: ThemeTokens,
     hapticsEnabled: Boolean,
+    appsCatalog: List<AppDefinition> = MockCatalogData.APPS_CATALOG,
+    nativeWidgetProviders: List<NativeWidgetProviderSpec> = emptyList(),
     onClose: () -> Unit,
     onSelectTile: (TileData) -> Unit,
     onStartCatalogDrag: (tile: TileData, pointerXRootPx: Float, pointerYRootPx: Float) -> Unit,
+    onBindNativeWidget: (NativeWidgetProviderSpec) -> Unit = {},
 ) {
     var activeTab by remember { mutableStateOf(CatalogTab.EIGEN) }
 
@@ -522,10 +528,40 @@ fun TileCatalogSheet(
                                 }
                             }
                         }
+
+                        items(
+                            nativeWidgetProviders.take(24),
+                            key = { "sys-${it.providerPackage}-${it.providerClass}" },
+                        ) { provider ->
+                            val hue = InstalledAppsMapper.stableHueForPackage(provider.providerPackage)
+                            val surf = theme.getTileSurface(hue, SurfaceEmphasis.MUTED)
+                            Column(
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 112.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Brush.linearGradient(listOf(surf.backgroundStart, surf.backgroundEnd)))
+                                    .border(surf.borderWidthDp.dp, surf.borderColor, RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
+                                        onBindNativeWidget(provider)
+                                    }
+                                    .padding(13.dp),
+                                verticalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text("SYSTEM-WIDGET BINDEN", color = surf.accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(10.dp))
+                                Text(provider.label, color = surf.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "${provider.minWidthDp.toInt()}×${provider.minHeightDp.toInt()} dp",
+                                    color = surf.textSecondary,
+                                    fontSize = 11.5.sp,
+                                )
+                            }
+                        }
                     }
 
                     CatalogTab.APPS -> {
-                        items(MockCatalogData.APPS_CATALOG.take(24), key = { it.id }) { app ->
+                        items(appsCatalog.take(36), key = { it.id }) { app ->
                             val template = TileData(
                                 id = "cat-app-${app.id}",
                                 type = TileType.SINGLE_APP,

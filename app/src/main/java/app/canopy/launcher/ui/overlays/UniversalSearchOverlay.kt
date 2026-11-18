@@ -154,14 +154,15 @@ fun UniversalSearchOverlay(
     theme: ThemeTokens,
     hapticsEnabled: Boolean,
     allAppsCatalog: List<AppDefinition> = MockCatalogData.APPS_CATALOG,
+    contactsCatalog: List<ContactItem> = MockCatalogData.CONTACTS_MOCK,
     onClose: () -> Unit,
     onOpenApp: (appId: String, sourceRect: Rect?) -> Unit,
     onSearchWeb: (query: String, sourceRect: Rect?) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     val trimmedQuery = query.trim()
-    val results = remember(query, allAppsCatalog) {
-        UniversalSearchEngine.filterAll(query, apps = allAppsCatalog)
+    val results = remember(query, allAppsCatalog, contactsCatalog) {
+        UniversalSearchEngine.filterAll(query, apps = allAppsCatalog, contacts = contactsCatalog)
     }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {

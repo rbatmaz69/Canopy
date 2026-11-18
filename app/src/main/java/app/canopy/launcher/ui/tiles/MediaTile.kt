@@ -75,7 +75,7 @@ object MediaTileHelpers {
 
 @Composable
 fun MediaTile(props: TileContentProps) {
-    val track = SystemTileDefaults.MEDIA_TRACKS[
+    val track = props.mediaState.overrideTrack ?: SystemTileDefaults.MEDIA_TRACKS[
         props.mediaState.trackIndex % SystemTileDefaults.MEDIA_TRACKS.size
     ]
     val isLargeHero = props.tile.mediaLarge == true || props.tier == TileSizeTier.L

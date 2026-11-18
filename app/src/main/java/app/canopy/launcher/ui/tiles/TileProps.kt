@@ -105,6 +105,7 @@ data class MediaPlayerState(
     val trackIndex: Int = 0,
     val isPlaying: Boolean = true,
     val progress: Float = 0.36f,
+    val overrideTrack: MediaTrack? = null,
     val onTogglePlay: () -> Unit = {},
     val onPrev: () -> Unit = {},
     val onNext: () -> Unit = {},

@@ -1,9 +1,13 @@
 package app.canopy.launcher.ui
 
+import android.app.Activity
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -55,7 +59,11 @@ import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.motion.HapticVisualFeedbackLayer
 import app.canopy.launcher.motion.SpringRole
 import app.canopy.launcher.system.DeviceAppsController
+import app.canopy.launcher.system.LiveMediaSessionSnapshot
+import app.canopy.launcher.system.NativeWidgetProviderSpec
 import app.canopy.launcher.system.NotificationBadgeStore
+import app.canopy.launcher.system.SystemDataAndWidgetEngine
+import app.canopy.launcher.system.SystemDataProvider
 import app.canopy.launcher.ui.components.BottomDockBar
 import app.canopy.launcher.ui.components.IconStyleConfig
 import app.canopy.launcher.ui.components.LocalIconStyle
@@ -111,6 +119,12 @@ fun CanopyLauncherApp() {
     }
     val liveAppsCatalog by deviceAppsController.catalogFlow.collectAsState()
 
+    val systemDataProvider = remember(context) { SystemDataProvider(context) }
+    val nativeWidgetProviders = remember(systemDataProvider) { systemDataProvider.loadInstalledWidgetProviders() }
+    val deviceContacts = remember(systemDataProvider) {
+        SystemDataAndWidgetEngine.mergeContacts(systemDataProvider.loadDeviceContacts())
+    }
+
     val store = remember(context) { SharedPreferencesLauncherStore(context) }
     val initialState = remember {
         store.load() ?: PersistedLauncherState(pages = MockCatalogData.createInitialPages(ShortcutBarMode.ALL))
@@ -126,7 +140,9 @@ fun CanopyLauncherApp() {
     var motionSettings by remember { mutableStateOf(initialState.motionSettings) }
     var alarmState by remember { mutableStateOf(initialState.alarmState) }
 
-    var calendarEvents by remember { mutableStateOf(SystemTileDefaults.CALENDAR_EVENTS) }
+    var calendarEvents by remember {
+        mutableStateOf(SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents()))
+    }
     val notifSyncState by NotificationBadgeStore.state.collectAsState()
 
     val startIdx = remember {
@@ -183,32 +199,79 @@ fun CanopyLauncherApp() {
         }
     }
 
-    // Shared Media Player State
+    // Shared Media Player State (bridges live MediaSessionManager when permitted, otherwise smooth demo tracks)
     var trackIndex by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(true) }
     var mediaProgress by remember { mutableFloatStateOf(0.36f) }
+    var liveMediaSnapshot by remember { mutableStateOf<LiveMediaSessionSnapshot?>(null) }
 
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            delay(800L)
-            mediaProgress = if (mediaProgress >= 0.995f) 0f else mediaProgress + 0.004f
+    LaunchedEffect(systemDataProvider) {
+        while (true) {
+            liveMediaSnapshot = systemDataProvider.readActiveMediaSnapshot()
+            delay(1500L)
         }
+    }
+
+    LaunchedEffect(isPlaying, liveMediaSnapshot) {
+        if (liveMediaSnapshot == null) {
+            while (isPlaying) {
+                delay(800L)
+                mediaProgress = if (mediaProgress >= 0.995f) 0f else mediaProgress + 0.004f
+            }
+        }
+    }
+
+    val liveMapped = remember(liveMediaSnapshot) {
+        liveMediaSnapshot?.let { SystemDataAndWidgetEngine.mapMediaSnapshotToTrack(it) }
+    }
+    val activeController = remember(liveMediaSnapshot) {
+        if (liveMediaSnapshot != null) systemDataProvider.queryActiveMediaController() else null
     }
 
     val mediaState = MediaPlayerState(
         trackIndex = trackIndex,
-        isPlaying = isPlaying,
-        progress = mediaProgress,
-        onTogglePlay = { isPlaying = !isPlaying },
+        isPlaying = liveMediaSnapshot?.isPlaying ?: isPlaying,
+        progress = liveMapped?.second ?: mediaProgress,
+        overrideTrack = liveMapped?.first,
+        onTogglePlay = {
+            val ctrl = activeController
+            if (ctrl != null) {
+                runCatching {
+                    if (liveMediaSnapshot?.isPlaying == true) ctrl.transportControls.pause()
+                    else ctrl.transportControls.play()
+                }
+            } else {
+                isPlaying = !isPlaying
+            }
+        },
         onPrev = {
-            trackIndex = (trackIndex - 1 + SystemTileDefaults.MEDIA_TRACKS.size) % SystemTileDefaults.MEDIA_TRACKS.size
-            mediaProgress = 0.08f
+            val ctrl = activeController
+            if (ctrl != null) {
+                runCatching { ctrl.transportControls.skipToPrevious() }
+            } else {
+                trackIndex = (trackIndex - 1 + SystemTileDefaults.MEDIA_TRACKS.size) % SystemTileDefaults.MEDIA_TRACKS.size
+                mediaProgress = 0.08f
+            }
         },
         onNext = {
-            trackIndex = (trackIndex + 1) % SystemTileDefaults.MEDIA_TRACKS.size
-            mediaProgress = 0.08f
+            val ctrl = activeController
+            if (ctrl != null) {
+                runCatching { ctrl.transportControls.skipToNext() }
+            } else {
+                trackIndex = (trackIndex + 1) % SystemTileDefaults.MEDIA_TRACKS.size
+                mediaProgress = 0.08f
+            }
         },
-        onSeek = { mediaProgress = it.coerceIn(0f, 1f) },
+        onSeek = { ratio ->
+            val ctrl = activeController
+            val snap = liveMediaSnapshot
+            if (ctrl != null && snap != null) {
+                val targetMs = (ratio.coerceIn(0f, 1f) * snap.durationMs.coerceAtLeast(1000L)).toLong()
+                runCatching { ctrl.transportControls.seekTo(targetMs) }
+            } else {
+                mediaProgress = ratio.coerceIn(0f, 1f)
+            }
+        },
     )
 
     var systemState by remember { mutableStateOf(SystemControlState()) }
@@ -329,6 +392,36 @@ fun CanopyLauncherApp() {
         // Active drop preview during drag
         val activePage = pages.getOrNull(activePageIndex)
         val gapDp = if (isEditMode) theme.gapEditDp else theme.gapUseDp
+
+        // Pending AppWidget bind flow
+        var pendingWidgetBind by remember { mutableStateOf<Pair<Int, NativeWidgetProviderSpec>?>(null) }
+        val insertBoundWidget: (Int, NativeWidgetProviderSpec) -> Unit = { widgetId, spec ->
+            val targetPage = pages.getOrNull(activePageIndex)
+            if (targetPage != null && targetPage.kind != PageKind.ALL_APPS) {
+                val matchedAppId = liveAppsCatalog.firstOrNull { it.packageName == spec.providerPackage }?.id
+                val widgetTile = SystemDataAndWidgetEngine.buildWidgetTileFromProvider(spec, widgetId, matchedAppId)
+                pages = pages.map { p ->
+                    if (p.id == targetPage.id) {
+                        CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, widgetTile, pageBoundsDp, gapDp)
+                    } else p
+                }
+            }
+            showCatalog = false
+        }
+        val widgetBindLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val pending = pendingWidgetBind
+            pendingWidgetBind = null
+            if (pending != null) {
+                val (widgetId, spec) = pending
+                if (result.resultCode == Activity.RESULT_OK) {
+                    insertBoundWidget(widgetId, spec)
+                } else {
+                    runCatching { appWidgetHost?.deleteAppWidgetId(widgetId) }
+                }
+            }
+        }
         val dropPreview = activeDrag?.let { drag ->
             val pointerXDp = with(density) { drag.pointerXRootPx.toDp().value }
             val pointerYDp = with(density) { (drag.pointerYRootPx - with(density) { statusBarH.dp.toPx() }).toDp().value }
@@ -667,6 +760,7 @@ fun CanopyLauncherApp() {
                     UniversalSearchOverlay(
                         theme = theme,
                         allAppsCatalog = liveAppsCatalog,
+                        contactsCatalog = deviceContacts,
                         hapticsEnabled = motionSettings.hapticsEnabled,
                         onClose = { showSearch = false },
                         onOpenApp = { appId, rect -> openAppWithBadgeSync(appId, rect, null) },
@@ -687,6 +781,8 @@ fun CanopyLauncherApp() {
                     TileCatalogSheet(
                         theme = theme,
                         hapticsEnabled = motionSettings.hapticsEnabled,
+                        appsCatalog = liveAppsCatalog,
+                        nativeWidgetProviders = nativeWidgetProviders,
                         onClose = { showCatalog = false },
                         onSelectTile = { tile ->
                             if (activePage != null && activePage.kind != PageKind.ALL_APPS) {
@@ -708,6 +804,27 @@ fun CanopyLauncherApp() {
                                 pointerXRootPx = xPx,
                                 pointerYRootPx = yPx,
                             )
+                        },
+                        onBindNativeWidget = { spec ->
+                            val host = appWidgetHost
+                            val manager = appWidgetManager
+                            if (host != null && manager != null) {
+                                runCatching {
+                                    val widgetId = host.allocateAppWidgetId()
+                                    val component = ComponentName(spec.providerPackage, spec.providerClass)
+                                    val bound = manager.bindAppWidgetIdIfAllowed(widgetId, component)
+                                    if (bound) {
+                                        insertBoundWidget(widgetId, spec)
+                                    } else {
+                                        pendingWidgetBind = widgetId to spec
+                                        val bindIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND).apply {
+                                            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                                            putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, component)
+                                        }
+                                        widgetBindLauncher.launch(bindIntent)
+                                    }
+                                }
+                            }
                         },
                     )
                 }

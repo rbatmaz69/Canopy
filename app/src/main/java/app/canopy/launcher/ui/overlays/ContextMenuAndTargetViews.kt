@@ -742,7 +742,8 @@ private fun MediaTargetView(
     accentColor: Color,
     accentBg: Color,
 ) {
-    val track = SystemTileDefaults.MEDIA_TRACKS[mediaState.trackIndex % SystemTileDefaults.MEDIA_TRACKS.size]
+    val track = mediaState.overrideTrack
+        ?: SystemTileDefaults.MEDIA_TRACKS[mediaState.trackIndex % SystemTileDefaults.MEDIA_TRACKS.size]
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),

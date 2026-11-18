@@ -276,6 +276,381 @@ object TilingEngine {
         }
 
         walk(root, bounds)
-        return ComputedLayout(leaves = leaves, dividers = dividers, intersections = emptyList())
+
+        // Compute 2D intersection handles where horizontal (vertical-line) and vertical (horizontal-line) dividers meet
+        data class MutableIntersection(
+            val id: String,
+            var x: Float,
+            var y: Float,
+            val horizontalSplits: MutableList<ComputedDivider>,
+            val verticalSplits: MutableList<ComputedDivider>,
+        )
+
+        val intersections = mutableListOf<MutableIntersection>()
+        val hSplits = dividers.filter { it.direction == SplitDirection.HORIZONTAL }
+        val vSplits = dividers.filter { it.direction == SplitDirection.VERTICAL }
+        val tol = gap + 6f
+
+        for (h in hSplits) {
+            val hx = h.rect.x + h.rect.width / 2f
+            val hyMin = h.rect.y - tol
+            val hyMax = h.rect.y + h.rect.height + tol
+
+            for (v in vSplits) {
+                val vy = v.rect.y + v.rect.height / 2f
+                val vxMin = v.rect.x - tol
+                val vxMax = v.rect.x + v.rect.width + tol
+
+                if (hx in vxMin..vxMax && vy in hyMin..hyMax) {
+                    val existing = intersections.find { abs(it.x - hx) <= 16f && abs(it.y - vy) <= 16f }
+                    if (existing != null) {
+                        if (existing.horizontalSplits.none { it.id == h.id }) {
+                            existing.horizontalSplits.add(h)
+                        }
+                        if (existing.verticalSplits.none { it.id == v.id }) {
+                            existing.verticalSplits.add(v)
+                        }
+                        existing.x = existing.horizontalSplits
+                            .map { it.rect.x + it.rect.width / 2f }
+                            .average()
+                            .toFloat()
+                        existing.y = existing.verticalSplits
+                            .map { it.rect.y + it.rect.height / 2f }
+                            .average()
+                            .toFloat()
+                    } else {
+                        intersections.add(
+                            MutableIntersection(
+                                id = "ix-${h.id}-${v.id}",
+                                x = hx,
+                                y = vy,
+                                horizontalSplits = mutableListOf(h),
+                                verticalSplits = mutableListOf(v),
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        return ComputedLayout(
+            leaves = leaves,
+            dividers = dividers,
+            intersections = intersections.map {
+                ComputedIntersection(
+                    id = it.id,
+                    x = it.x,
+                    y = it.y,
+                    horizontalSplits = it.horizontalSplits.toList(),
+                    verticalSplits = it.verticalSplits.toList(),
+                )
+            },
+        )
+    }
+
+    fun updateSplitRatio(root: TreeNode, splitId: String, newRatio: Float): TreeNode = when (root) {
+        is LeafNode -> root
+        is SplitNode -> {
+            if (root.id == splitId) {
+                root.copy(ratio = newRatio)
+            } else {
+                root.copy(
+                    first = updateSplitRatio(root.first, splitId, newRatio),
+                    second = updateSplitRatio(root.second, splitId, newRatio),
+                )
+            }
+        }
+    }
+
+    fun updateMultipleSplitRatios(root: TreeNode, updates: Map<String, Float>): TreeNode = when (root) {
+        is LeafNode -> root
+        is SplitNode -> root.copy(
+            ratio = updates[root.id] ?: root.ratio,
+            first = updateMultipleSplitRatios(root.first, updates),
+            second = updateMultipleSplitRatios(root.second, updates),
+        )
+    }
+
+    fun nudgeLeafSize(root: TreeNode, leafId: String, delta: Float): TreeNode = when (root) {
+        is LeafNode -> root
+        is SplitNode -> when {
+            root.first is LeafNode && root.first.id == leafId ->
+                root.copy(ratio = (root.ratio + delta).coerceIn(0.2f, 0.8f))
+            root.second is LeafNode && root.second.id == leafId ->
+                root.copy(ratio = (root.ratio - delta).coerceIn(0.2f, 0.8f))
+            else -> root.copy(
+                first = nudgeLeafSize(root.first, leafId, delta),
+                second = nudgeLeafSize(root.second, leafId, delta),
+            )
+        }
+    }
+
+    fun toggleSplitDirection(root: TreeNode, splitId: String): TreeNode = when (root) {
+        is LeafNode -> root
+        is SplitNode -> {
+            if (root.id == splitId) {
+                root.copy(
+                    direction = if (root.direction == SplitDirection.HORIZONTAL) {
+                        SplitDirection.VERTICAL
+                    } else {
+                        SplitDirection.HORIZONTAL
+                    }
+                )
+            } else {
+                root.copy(
+                    first = toggleSplitDirection(root.first, splitId),
+                    second = toggleSplitDirection(root.second, splitId),
+                )
+            }
+        }
+    }
+
+    fun updateLeafTile(root: TreeNode, leafId: String, updater: (TileData) -> TileData): TreeNode =
+        when (root) {
+            is LeafNode -> if (root.id == leafId) root.copy(tile = updater(root.tile)) else root
+            is SplitNode -> root.copy(
+                first = updateLeafTile(root.first, leafId, updater),
+                second = updateLeafTile(root.second, leafId, updater),
+            )
+        }
+
+    fun splitLeaf(
+        root: TreeNode,
+        targetLeafId: String,
+        newTile: TileData,
+        dropZone: DropZone,
+        ratio: Float = 0.5f,
+        newLeafId: String? = null,
+    ): TreeNode {
+        val safeEdgeZone = if (dropZone == DropZone.CENTER) DropZone.BOTTOM else dropZone
+        return when (root) {
+            is LeafNode -> {
+                if (root.id != targetLeafId) {
+                    root
+                } else {
+                    val insertedLeaf = LeafNode(
+                        id = newLeafId ?: createNodeId("leaf"),
+                        tile = newTile,
+                    )
+                    val direction =
+                        if (safeEdgeZone == DropZone.LEFT || safeEdgeZone == DropZone.RIGHT) {
+                            SplitDirection.HORIZONTAL
+                        } else {
+                            SplitDirection.VERTICAL
+                        }
+                    val isNewFirst = safeEdgeZone == DropZone.LEFT || safeEdgeZone == DropZone.TOP
+                    SplitNode(
+                        id = createNodeId("split"),
+                        direction = direction,
+                        ratio = ratio,
+                        first = if (isNewFirst) insertedLeaf else root,
+                        second = if (isNewFirst) root else insertedLeaf,
+                    )
+                }
+            }
+            is SplitNode -> root.copy(
+                first = splitLeaf(root.first, targetLeafId, newTile, safeEdgeZone, ratio, newLeafId),
+                second = splitLeaf(root.second, targetLeafId, newTile, safeEdgeZone, ratio, newLeafId),
+            )
+        }
+    }
+
+    data class RemoveLeafResult(
+        val tree: TreeNode?,
+        val removed: LeafNode? = null,
+    )
+
+    fun removeLeaf(root: TreeNode, targetLeafId: String): RemoveLeafResult {
+        when (root) {
+            is LeafNode -> {
+                return if (root.id == targetLeafId) {
+                    RemoveLeafResult(tree = null, removed = root)
+                } else {
+                    RemoveLeafResult(tree = root)
+                }
+            }
+            is SplitNode -> {
+                if (root.first is LeafNode && root.first.id == targetLeafId) {
+                    return RemoveLeafResult(tree = root.second, removed = root.first)
+                }
+                if (root.second is LeafNode && root.second.id == targetLeafId) {
+                    return RemoveLeafResult(tree = root.first, removed = root.second)
+                }
+
+                val leftRes = removeLeaf(root.first, targetLeafId)
+                if (leftRes.removed != null) {
+                    return RemoveLeafResult(
+                        tree = leftRes.tree?.let { root.copy(first = it) } ?: root.second,
+                        removed = leftRes.removed,
+                    )
+                }
+
+                val rightRes = removeLeaf(root.second, targetLeafId)
+                if (rightRes.removed != null) {
+                    return RemoveLeafResult(
+                        tree = rightRes.tree?.let { root.copy(second = it) } ?: root.first,
+                        removed = rightRes.removed,
+                    )
+                }
+
+                return RemoveLeafResult(tree = root)
+            }
+        }
+    }
+
+    fun swapLeaves(root: TreeNode, leafIdA: String, leafIdB: String): TreeNode {
+        if (leafIdA == leafIdB) return root
+        val leafA = findLeaf(root, leafIdA) ?: return root
+        val leafB = findLeaf(root, leafIdB) ?: return root
+
+        fun replace(node: TreeNode): TreeNode = when (node) {
+            is LeafNode -> when (node.id) {
+                leafIdA -> leafB.copy()
+                leafIdB -> leafA.copy()
+                else -> node
+            }
+            is SplitNode -> node.copy(
+                first = replace(node.first),
+                second = replace(node.second),
+            )
+        }
+
+        return replace(root)
+    }
+
+    /**
+     * Moves an existing leaf onto a target leaf's edge, removing it from its old slot
+     * and splitting the target leaf while preserving the moved leaf's ID.
+     */
+    fun moveLeafToSplit(
+        root: TreeNode,
+        sourceLeafId: String,
+        targetLeafId: String,
+        dropZone: DropZone,
+        ratio: Float = 0.5f,
+    ): TreeNode {
+        if (sourceLeafId == targetLeafId) return root
+        if (dropZone == DropZone.CENTER) {
+            return swapLeaves(root, sourceLeafId, targetLeafId)
+        }
+        val removedRes = removeLeaf(root, sourceLeafId)
+        val removed = removedRes.removed ?: return root
+        val remainingTree = removedRes.tree ?: return root
+        return splitLeaf(
+            root = remainingTree,
+            targetLeafId = targetLeafId,
+            newTile = removed.tile,
+            dropZone = dropZone,
+            ratio = ratio,
+            newLeafId = removed.id,
+        )
+    }
+
+    /**
+     * Transforms a page's tree into one of 3 preset layout patterns while keeping
+     * existing leaf IDs so animations smoothly morph tiles into their new positions.
+     */
+    fun applyTemplate(
+        root: TreeNode,
+        template: TemplateKind,
+        fallbackTiles: List<TileData>,
+    ): TreeNode {
+        val existing = collectLeaves(root)
+        fun getLeaf(idx: Int): LeafNode {
+            if (idx < existing.size) return existing[idx]
+            val fallback = fallbackTiles[idx % fallbackTiles.size]
+            return LeafNode(
+                id = createNodeId("leaf"),
+                tile = fallback.copy(id = createNodeId("tile")),
+            )
+        }
+
+        return when (template) {
+            TemplateKind.GRID_2X2 -> SplitNode(
+                id = createNodeId("split"),
+                direction = SplitDirection.VERTICAL,
+                ratio = 0.5f,
+                first = SplitNode(
+                    id = createNodeId("split"),
+                    direction = SplitDirection.HORIZONTAL,
+                    ratio = 0.5f,
+                    first = getLeaf(0),
+                    second = getLeaf(1),
+                ),
+                second = SplitNode(
+                    id = createNodeId("split"),
+                    direction = SplitDirection.HORIZONTAL,
+                    ratio = 0.5f,
+                    first = getLeaf(2),
+                    second = getLeaf(3),
+                ),
+            )
+            TemplateKind.BIG_PLUS_3 -> SplitNode(
+                id = createNodeId("split"),
+                direction = SplitDirection.VERTICAL,
+                ratio = 0.58f,
+                first = getLeaf(0),
+                second = SplitNode(
+                    id = createNodeId("split"),
+                    direction = SplitDirection.HORIZONTAL,
+                    ratio = 1f / 3f,
+                    first = getLeaf(1),
+                    second = SplitNode(
+                        id = createNodeId("split"),
+                        direction = SplitDirection.HORIZONTAL,
+                        ratio = 0.5f,
+                        first = getLeaf(2),
+                        second = getLeaf(3),
+                    ),
+                ),
+            )
+            TemplateKind.COL_PLUS_GRID -> SplitNode(
+                id = createNodeId("split"),
+                direction = SplitDirection.HORIZONTAL,
+                ratio = 0.42f,
+                first = getLeaf(0),
+                second = SplitNode(
+                    id = createNodeId("split"),
+                    direction = SplitDirection.VERTICAL,
+                    ratio = 0.5f,
+                    first = SplitNode(
+                        id = createNodeId("split"),
+                        direction = SplitDirection.HORIZONTAL,
+                        ratio = 0.5f,
+                        first = getLeaf(1),
+                        second = getLeaf(2),
+                    ),
+                    second = SplitNode(
+                        id = createNodeId("split"),
+                        direction = SplitDirection.HORIZONTAL,
+                        ratio = 0.5f,
+                        first = getLeaf(3),
+                        second = getLeaf(4),
+                    ),
+                ),
+            )
+        }
+    }
+
+    fun determineDropZone(relX: Float, relY: Float, width: Float, height: Float): DropZone {
+        val nx = relX / max(1f, width)
+        val ny = relY / max(1f, height)
+
+        if (nx in 0.27f..0.73f && ny in 0.27f..0.73f) {
+            return DropZone.CENTER
+        }
+
+        val distLeft = nx
+        val distRight = 1f - nx
+        val distTop = ny
+        val distBottom = 1f - ny
+        val minDist = min(min(distLeft, distRight), min(distTop, distBottom))
+
+        return when (minDist) {
+            distLeft -> DropZone.LEFT
+            distRight -> DropZone.RIGHT
+            distTop -> DropZone.TOP
+            else -> DropZone.BOTTOM
+        }
     }
 }

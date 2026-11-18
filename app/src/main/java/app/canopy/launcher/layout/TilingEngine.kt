@@ -1,6 +1,7 @@
 package app.canopy.launcher.layout
 
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -14,6 +15,7 @@ object TilingEngine {
     const val GAP_EDIT_DP = 12f
     const val EDGE_PADDING_DP = 8f
     const val MIN_TILE_SIZE = 56f
+    val SNAP_POINTS = listOf(0.25f, 1f / 3f, 0.5f, 2f / 3f, 0.75f)
 
     private val idCounter = AtomicLong(1L)
 
@@ -103,6 +105,117 @@ object TilingEngine {
             minSecondPx = minSecondPx,
             usableSpan = usableSpan,
         )
+    }
+
+    /**
+     * Clamps or rubberbands a dragged split ratio when pushed past the 56dp minimum size.
+     */
+    fun clampOrRubberbandRatio(
+        rawRatio: Float,
+        parentSpan: Float,
+        minFirstPx: Float,
+        minSecondPx: Float,
+        rubberbandFactor: Float = 0.30f,
+        gap: Float = GAP_EDIT_DP,
+    ): Float {
+        val usableSpan = max(1f, parentSpan - gap)
+        if (minFirstPx + minSecondPx >= usableSpan) {
+            return minFirstPx / (minFirstPx + minSecondPx)
+        }
+
+        val minRatio = minFirstPx / usableSpan
+        val maxRatio = 1f - minSecondPx / usableSpan
+
+        if (rawRatio < minRatio) {
+            val excess = minRatio - rawRatio
+            return max(0.02f, minRatio - excess * rubberbandFactor)
+        }
+        if (rawRatio > maxRatio) {
+            val excess = rawRatio - maxRatio
+            return min(0.98f, maxRatio + excess * rubberbandFactor)
+        }
+        return rawRatio
+    }
+
+    /**
+     * Projects final position from pointer velocity and snaps to nearest valid
+     * proportion among 1/4, 1/3, 1/2, 2/3, 3/4 within [minRatio, maxRatio].
+     */
+    fun projectAndSnapRatio(
+        currentRatio: Float,
+        velocityPxPerSec: Float,
+        parentSpan: Float,
+        minRatio: Float,
+        maxRatio: Float,
+        velocityFactor: Float = 0.12f,
+    ): Float {
+        val safeSpan = max(1f, parentSpan)
+        val projected = currentRatio + (velocityPxPerSec * velocityFactor) / safeSpan
+        val clampedProjected = projected.coerceIn(minRatio, maxRatio)
+
+        val validSnaps = SNAP_POINTS
+            .filter { it >= minRatio - 0.001f && it <= maxRatio + 0.001f }
+            .map { it.coerceIn(minRatio, maxRatio) }
+
+        if (validSnaps.isEmpty()) {
+            return clampedProjected
+        }
+
+        var best = validSnaps[0]
+        var bestDist = abs(clampedProjected - best)
+        for (i in 1 until validSnaps.size) {
+            val dist = abs(clampedProjected - validSnaps[i])
+            if (dist < bestDist) {
+                best = validSnaps[i]
+                bestDist = dist
+            }
+        }
+        return best
+    }
+
+    /**
+     * Determines the tile size tier from dp dimensions with an 8dp (±4dp) hysteresis band
+     * so tiles never flicker when dragged across thresholds.
+     */
+    fun computeSizeTier(
+        width: Float,
+        height: Float,
+        prevTier: TileSizeTier? = null,
+    ): TileSizeTier {
+        val minDim = min(width, height)
+        val area = width * height
+        val h = 4f // +/- 4dp = 8dp total hysteresis band
+
+        val xsLimit = if (prevTier == TileSizeTier.XS) 80f + h else 80f - h
+        if (minDim < xsLimit) {
+            return TileSizeTier.XS
+        }
+
+        val tickerHeightMax = if (prevTier == TileSizeTier.TICKER) 86f + h else 86f - h
+        val tickerWidthMin = if (prevTier == TileSizeTier.TICKER) 175f - h else 175f + h
+        if (height < tickerHeightMax && width >= tickerWidthMin) {
+            return TileSizeTier.TICKER
+        }
+
+        val listWidthMax = if (prevTier == TileSizeTier.LIST) 100f + h else 100f - h
+        val listHeightMin = if (prevTier == TileSizeTier.LIST) 185f - h else 185f + h
+        if (width < listWidthMax && height >= listHeightMin) {
+            return TileSizeTier.LIST
+        }
+
+        val sDimLimit = if (prevTier == TileSizeTier.S) 130f + h else 130f - h
+        val sAreaLimit = if (prevTier == TileSizeTier.S) 20000f else 18000f
+        if (minDim < sDimLimit || area < sAreaLimit) {
+            return TileSizeTier.S
+        }
+
+        val mDimLimit = if (prevTier == TileSizeTier.M) 195f + h else 195f - h
+        val mAreaLimit = if (prevTier == TileSizeTier.M) 40000f else 36500f
+        if (minDim < mDimLimit || area < mAreaLimit) {
+            return TileSizeTier.M
+        }
+
+        return TileSizeTier.L
     }
 
     /**

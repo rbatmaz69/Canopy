@@ -708,7 +708,7 @@ fun CalendarTile(props: TileContentProps) {
 
 @Composable
 fun RemindersTile(props: TileContentProps) {
-    val items = props.tile.reminders ?: SystemTileDefaults.DEFAULT_REMINDERS
+    val items = props.tile.reminders ?: emptyList()
     val openCount = items.count { !it.done }
 
     when (props.tier) {
@@ -769,6 +769,13 @@ fun RemindersTile(props: TileContentProps) {
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (items.isEmpty()) {
+                    Text(
+                        text = "Tippen für neuen Eintrag",
+                        color = props.surface.textSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
                 items.take(if (props.tier == TileSizeTier.S) 2 else 3).forEach { item ->
                     Row(
                         modifier = Modifier
@@ -924,7 +931,7 @@ fun StepsTile(props: TileContentProps) {
 
 @Composable
 fun NoteTile(props: TileContentProps) {
-    val lines = props.tile.noteLines ?: SystemTileDefaults.DEFAULT_NOTE_LINES
+    val lines = props.tile.noteLines ?: emptyList()
     if (props.tier == TileSizeTier.XS) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.Description, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(21.dp))
@@ -949,6 +956,13 @@ fun NoteTile(props: TileContentProps) {
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (lines.isEmpty()) {
+                    Text(
+                        text = "Tippen für Notiz",
+                        color = props.surface.textSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
                 lines.take(if (props.tier == TileSizeTier.S) 2 else 3).forEach { line ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.width(2.dp).height(14.dp).background(props.surface.accentColor))
@@ -1165,8 +1179,8 @@ fun QuickTogglesTile(props: TileContentProps) {
             },
         )
         TogglePreset.MEDIA -> listOf(
-            QuickActionItem("headphones", "Kopfhörer", "Audio", "Verbunden", "Lautspr.", props.systemState.bluetooth, null, Icons.Rounded.Headphones) {
-                props.systemState.onToggle(SystemToggleKey.BLUETOOTH)
+            QuickActionItem("headphones", "Kopfhörer", "Audio", "Bluetooth", "Panel", props.systemState.bluetooth, null, Icons.Rounded.Headphones) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.BLUETOOTH)
             },
             QuickActionItem("eq", "Klang", eqModes[eqIndex], eqModes[eqIndex], eqModes[eqIndex], true, null, Icons.Rounded.Tune) {
                 eqIndex = (eqIndex + 1) % eqModes.size
@@ -1174,42 +1188,46 @@ fun QuickTogglesTile(props: TileContentProps) {
             QuickActionItem("sleep-timer", "Timer", if (sleepTimerOn) "15m an" else "Timer", "15 Min.", "Aus", sleepTimerOn, Color(0xFFF59E0B), Icons.Rounded.Timer) {
                 sleepTimerOn = !sleepTimerOn
             },
-            QuickActionItem("podcast-open", "Podcast", "Podcast", "Folge 408", "Öffnen", false, null, Icons.Rounded.Radio) {
-                props.onOpenApp("app-podcast", null)
+            QuickActionItem("podcast-open", "Medien", "Medien", "App", "Öffnen", false, null, Icons.Rounded.Radio) {
+                val mediaAppId = props.allAppsCatalog.firstOrNull { it.iconKey == "Music2" || it.iconKey == "Headphones" }?.id ?: "app-musik"
+                props.onOpenApp(mediaAppId, null)
             },
         )
         TogglePreset.TOOLS -> listOf(
             QuickActionItem("quick-search", "Suche", "Suche", "Alle Apps", "Alle Apps", true, null, Icons.Rounded.Search) {
                 props.onOpenSearch()
             },
-            QuickActionItem("quick-qr", "QR-Scan", "QR-Scan", "Bereit", "Bereit", false, null, Icons.Rounded.QrCodeScanner) {
-                props.onOpenApp("app-qr", null)
+            QuickActionItem("quick-calc", "Rechner", "Rechner", "App", "App", false, null, Icons.Rounded.Calculate) {
+                val calcId = props.allAppsCatalog.firstOrNull { it.iconKey == "Calculator" }?.id ?: "app-rechner"
+                props.onOpenApp(calcId, null)
             },
-            QuickActionItem("quick-calc", "Rechner", "Rechner", "Schnell", "Schnell", false, null, Icons.Rounded.Calculate) {
-                props.onOpenApp("app-rechner", null)
+            QuickActionItem("quick-cam", "Kamera", "Kamera", "App", "App", false, null, Icons.Rounded.CameraAlt) {
+                val camId = props.allAppsCatalog.firstOrNull { it.iconKey == "Camera" }?.id ?: "app-kamera"
+                props.onOpenApp(camId, null)
             },
-            QuickActionItem("quick-cam", "Kamera", "Kamera", "50 MP", "50 MP", false, null, Icons.Rounded.CameraAlt) {
-                props.onOpenApp("app-kamera", null)
+            QuickActionItem("quick-settings", "System", "System", "Android", "Android", false, null, Icons.Rounded.Tune) {
+                val settingsId = props.allAppsCatalog.firstOrNull { it.iconKey == "Settings" }?.id ?: "app-einstellungen"
+                props.onOpenApp(settingsId, null)
             },
         )
         TogglePreset.SYSTEM -> listOf(
-            QuickActionItem("wifi", "WLAN", "WLAN", "Studio_5G", "Aus", props.systemState.wifi, null, if (props.systemState.wifi) Icons.Rounded.Wifi else Icons.Rounded.WifiOff) {
-                props.systemState.onToggle(SystemToggleKey.WIFI)
+            QuickActionItem("wifi", "WLAN", "WLAN", "Panel", "Panel", props.systemState.wifi, null, if (props.systemState.wifi) Icons.Rounded.Wifi else Icons.Rounded.WifiOff) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.WIFI)
             },
-            QuickActionItem("bluetooth", "Bluetooth", "BT", "Kopfhörer", "Aus", props.systemState.bluetooth, null, Icons.Rounded.Bluetooth) {
-                props.systemState.onToggle(SystemToggleKey.BLUETOOTH)
+            QuickActionItem("bluetooth", "Bluetooth", "BT", "Panel", "Panel", props.systemState.bluetooth, null, Icons.Rounded.Bluetooth) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.BLUETOOTH)
             },
-            QuickActionItem("flashlight", "Licht", "Licht", "Stufe 3", "Bereit", props.systemState.flashlight, Color(0xFFF59E0B), Icons.Rounded.FlashlightOn) {
+            QuickActionItem("flashlight", "Licht", "Licht", "An", "Aus", props.systemState.flashlight, Color(0xFFF59E0B), Icons.Rounded.FlashlightOn) {
                 props.systemState.onToggle(SystemToggleKey.FLASHLIGHT)
             },
-            QuickActionItem("dnd", "Fokus", "Fokus", "Aktiv", "Aus", props.systemState.dnd, null, Icons.Rounded.DarkMode) {
-                props.systemState.onToggle(SystemToggleKey.DND)
+            QuickActionItem("dnd", "Fokus", "Fokus", "Panel", "Panel", props.systemState.dnd, null, Icons.Rounded.DarkMode) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.DND)
             },
-            QuickActionItem("hotspot", "Hotspot", "Hotspot", "5 GHz", "Aus", props.systemState.hotspot, null, Icons.Rounded.Radio) {
-                props.systemState.onToggle(SystemToggleKey.HOTSPOT)
+            QuickActionItem("hotspot", "Hotspot", "Hotspot", "Panel", "Panel", props.systemState.hotspot, null, Icons.Rounded.Radio) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.HOTSPOT)
             },
-            QuickActionItem("autoRotate", "Drehen", "Drehen", "Auto", "Gesperrt", props.systemState.autoRotate, null, Icons.Rounded.ScreenRotation) {
-                props.systemState.onToggle(SystemToggleKey.AUTO_ROTATE)
+            QuickActionItem("autoRotate", "Drehen", "Drehen", "Display", "Display", props.systemState.autoRotate, null, Icons.Rounded.ScreenRotation) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.AUTO_ROTATE)
             },
         )
     }

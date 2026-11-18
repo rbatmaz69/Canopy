@@ -393,7 +393,7 @@ fun FakeAppOverlay(
         isBrowserMode && browserQuery.isNotBlank() -> "Suche: „${browserQuery.trim()}“"
         target.shortcutAction != null -> "Aktion: ${target.shortcutAction}"
         app != null -> app.subtitle
-        else -> "System-Kachel geöffnet"
+        else -> "Canopy Kachel"
     }
 
     val isLight = theme.mode == ColorMode.LIGHT && !theme.isGlass
@@ -487,14 +487,18 @@ fun FakeAppOverlay(
                         ) {
                             Icon(Icons.Rounded.Info, contentDescription = null, tint = accentColor, modifier = Modifier.size(20.dp))
                             Column {
-                                Text("Version 4.2.0 · Canopy", color = fg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text("Speicher: 48,4 MB · Berechtigungen: Mitteilungen, Standort", color = muted, fontSize = 12.sp)
+                                Text(title, color = fg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "Kachel-Typ: ${target.tile?.type?.name ?: "APP"} · ID: ${target.tile?.id ?: app?.packageName ?: "canopy"}",
+                                    color = muted,
+                                    fontSize = 12.sp,
+                                )
                             }
                         }
                         Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(cardBg).padding(16.dp)) {
-                            Text("Kachel-Anpassung", color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text("Adaptive Darstellung", color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(6.dp))
-                            Text("Diese Kachel passt sich im Tiling-Grid automatisch an XS-, S-, M- und L-Flächen an.", color = muted, fontSize = 12.sp)
+                            Text("Diese Kachel passt sich im Tiling-Grid dynamisch an XS-, S-, M- und L-Flächen an.", color = muted, fontSize = 12.sp)
                         }
                     }
 
@@ -573,7 +577,7 @@ fun FakeAppOverlay(
 
                     target.tile?.type == TileType.REMINDERS || target.tile?.type == TileType.NOTE || app?.id == "app-notizen" -> {
                         NotesTargetView(
-                            initialReminders = target.tile?.reminders?.takeIf { it.isNotEmpty() } ?: SystemTileDefaults.DEFAULT_REMINDERS,
+                            initialReminders = target.tile?.reminders ?: emptyList(),
                             checkAllInitially = target.shortcutAction == "Alle abhaken",
                             onPersistReminders = { updated ->
                                 val pid = target.pageId

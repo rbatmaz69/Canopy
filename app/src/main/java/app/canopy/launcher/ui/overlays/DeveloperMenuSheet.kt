@@ -101,6 +101,7 @@ fun DeveloperMenuSheet(
     onChangeShowHapticHud: (Boolean) -> Unit,
     onChangeShowFpsHud: (Boolean) -> Unit = {},
     onOpenGestureGuide: () -> Unit = {},
+    onOpenSetupAssistant: () -> Unit = {},
     onChangeUseSystemWallpaper: (Boolean) -> Unit = {},
     onRequestDefaultHome: () -> Unit = {},
     onExportLayoutJson: () -> Unit = {},
@@ -368,16 +369,28 @@ fun DeveloperMenuSheet(
 
             // System-Launcher & JSON Layout-Backup
             DevSection(label = "System-Launcher & Backup") {
-                DevToggleBtn(
-                    icon = Icons.Rounded.Home,
-                    label = "Als Standard-Launcher festlegen",
-                    active = false,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
-                        onRequestDefaultHome()
-                    },
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    DevToggleBtn(
+                        icon = Icons.Rounded.Home,
+                        label = "Standard-Launcher",
+                        active = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
+                            onRequestDefaultHome()
+                        },
+                    )
+                    DevToggleBtn(
+                        icon = Icons.Rounded.Tune,
+                        label = "Einrichtung",
+                        active = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
+                            onOpenSetupAssistant()
+                        },
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     DevToggleBtn(
                         icon = Icons.Rounded.FileUpload,

@@ -99,6 +99,7 @@ data class SystemControlState(
     val autoRotate: Boolean = true,
     val brightness: Float = 0.9f,
     val onToggle: (SystemToggleKey) -> Unit = {},
+    val onOpenSystemPanel: (SystemToggleKey) -> Unit = {},
     val onChangeBrightness: (Float) -> Unit = {},
 )
 

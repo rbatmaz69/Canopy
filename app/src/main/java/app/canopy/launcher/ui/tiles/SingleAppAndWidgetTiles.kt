@@ -326,128 +326,32 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
                         .shadow(10.dp, RoundedCornerShape(16.dp))
                         .clip(RoundedCornerShape(16.dp))
                         .background(innerCardBg)
+                        .clickable(enabled = !props.isEditMode) {
+                            CanopyHaptics.trigger(HapticKind.PRESS, props.motionSettings.hapticsEnabled)
+                            val targetApp = props.tile.appId
+                            if (targetApp != null) {
+                                props.onOpenApp(targetApp, openBtnRect)
+                            }
+                        }
                         .padding(12.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    if (isPodcast) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(Brush.linearGradient(listOf(Color(0xFF9333EA), Color(0xFF6366F1)))),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Rounded.Headphones, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text("Lage der Nation", color = innerText, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("Folge 408 · 14m", color = innerSub, fontSize = 10.sp)
-                            }
-                        }
-
-                        val bars = remember { listOf(42, 78, 60, 95, 50, 82, 68, 90, 44, 72, 85, 52) }
-                        Row(
-                            modifier = Modifier.fillMaxWidth().height(22.dp),
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            bars.forEachIndexed { idx, baseH ->
-                                val animH = if (props.mediaState.isPlaying) {
-                                    (baseH + (((props.mediaState.progress * 100).roundToInt() + idx) % 3 - 1) * 14).coerceIn(24, 98)
-                                } else {
-                                    baseH
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(animH / 100f)
-                                        .clip(CircleShape)
-                                        .background(if (idx < activeBarCount) Color(0xFFA855F7) else Color(0x47A855F7))
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "$podMm:$podSs / 42:00",
-                                color = innerSub,
-                                style = TextStyle(fontSize = 11.sp, fontFeatureSettings = "tnum"),
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF9333EA))
-                                    .clickable(enabled = !props.isEditMode) {
-                                        CanopyHaptics.trigger(HapticKind.PRESS, props.motionSettings.hapticsEnabled)
-                                        props.mediaState.onTogglePlay()
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = if (props.mediaState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    contentDescription = "Podcast abspielen",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(13.dp),
-                                )
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.AutoMirrored.Rounded.DirectionsRun, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(15.dp))
-                                Text("Fitness", color = innerText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Text(
-                                text = "$fitnessPct %",
-                                color = Color(0xFF10B981),
-                                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = hw.steps.formattedSteps,
-                                color = innerText,
-                                style = TextStyle(fontSize = 21.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
-                            )
-                            Text(
-                                text = "+250",
-                                color = Color(0xFF10B981),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(Color(0x3810B981))
-                                    .clickable(enabled = !props.isEditMode) {
-                                        CanopyHaptics.trigger(HapticKind.SNAP, props.motionSettings.hapticsEnabled)
-                                        hw.onAddBonusSteps(250)
-                                    }
-                                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text("$fitnessKcal kcal", color = innerSub, fontSize = 10.5.sp)
-                            Text("$fitnessKm km", color = innerSub, fontSize = 10.5.sp)
-                        }
-                    }
+                    Text(
+                        text = props.tile.title.ifBlank { "Android-Widget" },
+                        color = innerText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "Über „Bearbeiten → Kachel + → Widgets“ echtes System-Widget verknüpfen.",
+                        color = innerSub,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

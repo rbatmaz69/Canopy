@@ -24,6 +24,7 @@ data class PersistedLauncherState(
     val customCalendarEvents: List<CalendarEvent> = emptyList(),
     val weatherCityId: String = "berlin",
     val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val onboardingCompleted: Boolean = false,
 ) {
     companion object {
         const val CURRENT_SCHEMA_VERSION = 2

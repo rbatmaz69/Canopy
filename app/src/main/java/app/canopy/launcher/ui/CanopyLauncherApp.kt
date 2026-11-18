@@ -57,6 +57,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import app.canopy.launcher.data.AlarmState
 import app.canopy.launcher.data.ColorMode
@@ -109,6 +112,8 @@ import app.canopy.launcher.ui.overlays.FakeAppTarget
 import app.canopy.launcher.ui.overlays.FakeAppTargetKind
 import app.canopy.launcher.ui.overlays.GroupOverlayMode
 import app.canopy.launcher.ui.overlays.LauncherSettingsBridge
+import app.canopy.launcher.ui.overlays.OnboardingPermissionsHelper
+import app.canopy.launcher.ui.overlays.OnboardingSetupOverlay
 import app.canopy.launcher.ui.overlays.PageOverviewModal
 import app.canopy.launcher.ui.overlays.QuickSettingsNotificationShade
 import app.canopy.launcher.ui.overlays.TileCatalogSheet
@@ -174,9 +179,6 @@ fun CanopyLauncherApp(
 
     val systemDataProvider = remember(context) { SystemDataProvider(context) }
     val nativeWidgetProviders = remember(systemDataProvider) { systemDataProvider.loadInstalledWidgetProviders() }
-    val deviceContacts = remember(systemDataProvider) {
-        SystemDataAndWidgetEngine.mergeContacts(systemDataProvider.loadDeviceContacts())
-    }
 
     val store = remember(context) { SharedPreferencesLauncherStore(context) }
     val initialState = remember {
@@ -197,7 +199,30 @@ fun CanopyLauncherApp(
     var customCalendarEvents by remember { mutableStateOf(initialState.customCalendarEvents) }
     var weatherCityId by remember { mutableStateOf(initialState.weatherCityId) }
     var schemaVersion by remember { mutableIntStateOf(initialState.schemaVersion) }
+    var onboardingCompleted by remember { mutableStateOf(initialState.onboardingCompleted) }
+    var showSetupOverlay by remember { mutableStateOf(!initialState.onboardingCompleted) }
+    var permissionRefreshTick by remember { mutableIntStateOf(0) }
     var didRealAppMigration by remember { mutableStateOf(initialState.schemaVersion >= PersistedLauncherState.CURRENT_SCHEMA_VERSION && store.load() != null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isDefaultHome = homeRoleAndBackupController.isDefaultHome()
+                permissionRefreshTick += 1
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val onboardingStatus = remember(context, isDefaultHome, permissionRefreshTick) {
+        OnboardingPermissionsHelper.inspectStatus(context, isDefaultHome)
+    }
+
+    val deviceContacts = remember(systemDataProvider, permissionRefreshTick) {
+        SystemDataAndWidgetEngine.mergeContacts(systemDataProvider.loadDeviceContacts())
+    }
 
     LaunchedEffect(liveAppsCatalog, didRealAppMigration) {
         if (!didRealAppMigration && liveAppsCatalog.isNotEmpty()) {
@@ -214,7 +239,7 @@ fun CanopyLauncherApp(
         AllAppsCatalogSorter.applyUsageBoost(liveAppsCatalog, appUsageCounts)
     }
 
-    val baseCalendarEvents = remember(systemDataProvider) {
+    val baseCalendarEvents = remember(systemDataProvider, permissionRefreshTick) {
         SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents())
     }
     val calendarEvents = remember(customCalendarEvents, baseCalendarEvents) {
@@ -243,6 +268,7 @@ fun CanopyLauncherApp(
         customCalendarEvents = customCalendarEvents,
         weatherCityId = weatherCityId,
         schemaVersion = schemaVersion,
+        onboardingCompleted = onboardingCompleted,
     )
     LaunchedEffect(currentSnapshot) {
         store.save(currentSnapshot)
@@ -370,6 +396,14 @@ fun CanopyLauncherApp(
             systemState = next
             if (key == app.canopy.launcher.ui.tiles.SystemToggleKey.FLASHLIGHT) {
                 hardwareController.setTorchEnabled(next.flashlight)
+            }
+        },
+        onOpenSystemPanel = { key ->
+            val action = NotificationBadgeStore.settingsIntentForToggle(key)
+            runCatching {
+                context.startActivity(
+                    Intent(action).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                )
             }
         },
         onChangeBrightness = { v ->
@@ -1338,6 +1372,10 @@ fun CanopyLauncherApp(
                         showDevMenu = false
                         showGestureGuide = true
                     },
+                    onOpenSetupAssistant = {
+                        showDevMenu = false
+                        showSetupOverlay = true
+                    },
                     onChangeUseSystemWallpaper = { useSystemWallpaper = it },
                     onRequestDefaultHome = {
                         val roleIntent = homeRoleAndBackupController.buildDefaultLauncherRoleIntent()
@@ -1401,6 +1439,37 @@ fun CanopyLauncherApp(
                         snapToPage(startPageIdx, 0f)
                     },
                 )
+
+                if (showSetupOverlay) {
+                    OnboardingSetupOverlay(
+                        status = onboardingStatus,
+                        themeId = themeId,
+                        colorMode = colorMode,
+                        useSystemWallpaper = useSystemWallpaper,
+                        weatherCityId = weatherCityId,
+                        onRefreshStatus = {
+                            isDefaultHome = homeRoleAndBackupController.isDefaultHome()
+                            permissionRefreshTick += 1
+                        },
+                        onRequestDefaultHome = {
+                            val roleIntent = homeRoleAndBackupController.buildDefaultLauncherRoleIntent()
+                            if (roleIntent != null) {
+                                runCatching { defaultLauncherRoleLauncher.launch(roleIntent) }
+                                    .onFailure { homeRoleAndBackupController.openHomeSettingsFallback() }
+                            } else {
+                                homeRoleAndBackupController.openHomeSettingsFallback()
+                            }
+                        },
+                        onChangeThemeId = { themeId = it },
+                        onChangeColorMode = { colorMode = it },
+                        onChangeUseSystemWallpaper = { useSystemWallpaper = it },
+                        onSelectWeatherCity = { weatherCityId = it },
+                        onComplete = {
+                            onboardingCompleted = true
+                            showSetupOverlay = false
+                        },
+                    )
+                }
 
                 if (showGestureGuide) {
                     app.canopy.launcher.ui.overlays.GestureCheatSheetDialog(

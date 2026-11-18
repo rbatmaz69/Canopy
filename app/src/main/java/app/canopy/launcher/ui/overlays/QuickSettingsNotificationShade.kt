@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.system.LauncherNotification
+import app.canopy.launcher.system.LocalHardwareTelemetry
 import app.canopy.launcher.ui.theme.CanopyThemes
 import app.canopy.launcher.ui.theme.ThemeTokens
 import app.canopy.launcher.ui.tiles.SystemControlState
@@ -85,6 +86,7 @@ fun CanopyStatusBar(
     modifier: Modifier = Modifier,
     barHeightDp: Dp = 34.dp,
 ) {
+    val hw = LocalHardwareTelemetry.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -99,7 +101,7 @@ fun CanopyStatusBar(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "09:01",
+                text = hw.timeLabel,
                 color = theme.statusText,
                 style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
             )
@@ -144,6 +146,11 @@ fun CanopyStatusBar(
                 modifier = Modifier.size(13.dp),
             )
             Icon(Icons.Rounded.BatteryFull, contentDescription = "Akku", tint = theme.statusText, modifier = Modifier.size(14.dp))
+            Text(
+                text = "${hw.batteryPercent}%",
+                color = theme.statusText,
+                style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
+            )
             Box(
                 modifier = Modifier
                     .size(24.dp)

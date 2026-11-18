@@ -64,7 +64,9 @@ import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.motion.HapticVisualFeedbackLayer
 import app.canopy.launcher.motion.SpringRole
 import app.canopy.launcher.system.DeviceAppsController
+import app.canopy.launcher.system.LiveHardwareController
 import app.canopy.launcher.system.LiveMediaSessionSnapshot
+import app.canopy.launcher.system.LocalHardwareTelemetry
 import app.canopy.launcher.system.NativeWidgetProviderSpec
 import app.canopy.launcher.system.NotificationBadgeStore
 import app.canopy.launcher.system.SystemDataAndWidgetEngine
@@ -125,6 +127,13 @@ fun CanopyLauncherApp() {
         onDispose { deviceAppsController.stopListening() }
     }
     val liveAppsCatalog by deviceAppsController.catalogFlow.collectAsState()
+
+    val hardwareController = remember(context) { LiveHardwareController(context) }
+    DisposableEffect(hardwareController) {
+        hardwareController.start()
+        onDispose { hardwareController.stop() }
+    }
+    val hardwareTelemetry by hardwareController.telemetryFlow.collectAsState()
 
     val systemDataProvider = remember(context) { SystemDataProvider(context) }
     val nativeWidgetProviders = remember(systemDataProvider) { systemDataProvider.loadInstalledWidgetProviders() }
@@ -285,7 +294,13 @@ fun CanopyLauncherApp() {
 
     var systemState by remember { mutableStateOf(SystemControlState()) }
     systemState = systemState.copy(
-        onToggle = { key -> systemState = NotificationBadgeStore.toggleSystemKey(systemState, key) },
+        onToggle = { key ->
+            val next = NotificationBadgeStore.toggleSystemKey(systemState, key)
+            systemState = next
+            if (key == app.canopy.launcher.ui.tiles.SystemToggleKey.FLASHLIGHT) {
+                hardwareController.setTorchEnabled(next.flashlight)
+            }
+        },
         onChangeBrightness = { v -> systemState = systemState.copy(brightness = v.coerceIn(0.25f, 1f)) },
     )
 
@@ -465,6 +480,7 @@ fun CanopyLauncherApp() {
         CompositionLocalProvider(
             LocalCanopyTheme provides theme,
             LocalIconStyle provides iconStyle,
+            LocalHardwareTelemetry provides hardwareTelemetry,
             LocalAppWidgetHostFactory provides { widgetId ->
                 val info = appWidgetManager?.getAppWidgetInfo(widgetId)
                 if (info != null && appWidgetHost != null) {

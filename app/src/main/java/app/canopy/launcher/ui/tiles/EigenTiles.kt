@@ -88,6 +88,7 @@ import app.canopy.launcher.layout.ReminderItem
 import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.layout.TogglePreset
+import app.canopy.launcher.system.LocalHardwareTelemetry
 import app.canopy.launcher.ui.theme.CanopyThemes
 import kotlin.math.max
 import kotlin.math.min
@@ -117,10 +118,18 @@ object EigenTileActions {
 
     fun nextPhotoSceneIndex(currentIdx: Int, count: Int = SystemTileDefaults.PHOTO_SCENES.size): Int =
         if (count <= 0) 0 else (currentIdx + 1) % count
+
+    fun addQuickNoteLine(lines: List<String>): List<String> {
+        val idea = SystemTileDefaults.QUICK_REMINDER_IDEAS
+            .firstOrNull { candidate -> lines.none { it == candidate } }
+            ?: "Notiz #${lines.size + 1}"
+        return listOf(idea) + lines
+    }
 }
 
 @Composable
 fun GreetingTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     val fluidGreetingSize = max(23f, min(if (props.theme.isBold) 38f else 34f, props.widthDp * 0.135f))
     when (props.tier) {
         TileSizeTier.XS -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -133,9 +142,9 @@ fun GreetingTile(props: TileContentProps) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
-                Text("Guten Morgen", color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(hw.greetingSingleLine, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("Mi., 18. Nov · 7° Bewölkt", color = props.surface.textSecondary, fontSize = 13.sp)
+            Text("${hw.shortDateLabel} · 7° Bewölkt", color = props.surface.textSecondary, fontSize = 13.sp)
         }
         TileSizeTier.S, TileSizeTier.LIST -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -143,8 +152,8 @@ fun GreetingTile(props: TileContentProps) {
         ) {
             Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
             Column {
-                Text("Guten Morgen", color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp)
-                Text("18. Nov · 7°", color = props.surface.textSecondary, fontSize = 12.sp)
+                Text(hw.greetingSingleLine, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp)
+                Text("${hw.shortDateLabel} · 7°", color = props.surface.textSecondary, fontSize = 12.sp)
             }
         }
         else -> Column(
@@ -157,7 +166,7 @@ fun GreetingTile(props: TileContentProps) {
                 verticalAlignment = Alignment.Top,
             ) {
                 Text(
-                    text = "MITTWOCH, 18. NOV",
+                    text = hw.upperDateLabel,
                     color = props.surface.accentColor,
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -181,7 +190,7 @@ fun GreetingTile(props: TileContentProps) {
             }
             Column {
                 Text(
-                    text = "Guten\nMorgen",
+                    text = hw.greetingTwoLine,
                     color = props.surface.textPrimary,
                     style = TextStyle(
                         fontSize = fluidGreetingSize.sp,
@@ -324,32 +333,33 @@ fun TempCurveTile(props: TileContentProps) {
 
 @Composable
 fun ClockTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     val isAlarmOff = !props.alarmState.enabled || props.tile.subtitle == "Wecker aus"
     val alarmLabel = if (isAlarmOff) "Wecker aus" else "Wecker ${props.alarmState.timeLabel}"
     val fluidClockSize = max(28f, min(if (props.theme.isBold) 56f else 50f, min(props.widthDp * 0.24f, props.heightDp * 0.28f)))
 
     when (props.tier) {
         TileSizeTier.XS -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("09:01", color = props.surface.textPrimary, style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text(hw.timeLabel, color = props.surface.textPrimary, style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         TileSizeTier.TICKER -> Row(
             modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("09:01", color = props.surface.textPrimary, style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
-            Text("Mi., 18. Nov · $alarmLabel", color = props.surface.textSecondary, fontSize = 12.sp)
+            Text(hw.timeLabel, color = props.surface.textPrimary, style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text("${hw.shortDateLabel} · $alarmLabel", color = props.surface.textSecondary, fontSize = 12.sp)
         }
         TileSizeTier.LIST -> Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = "09\n01",
+                text = hw.stackedTimeLabel,
                 color = props.surface.textPrimary,
                 style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp, fontFeatureSettings = "tnum"),
             )
-            Text("Mi., 18. Nov", color = props.surface.textSecondary, fontSize = 11.sp)
+            Text(hw.shortDateLabel, color = props.surface.textSecondary, fontSize = 11.sp)
         }
         else -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -360,12 +370,12 @@ fun ClockTile(props: TileContentProps) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Mi., 18. Nov", color = props.surface.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(hw.shortDateLabel, color = props.surface.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Text("Berlin", color = props.surface.accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
 
             Text(
-                text = "09:01",
+                text = hw.timeLabel,
                 color = props.surface.textPrimary,
                 style = TextStyle(
                     fontSize = fluidClockSize.sp,
@@ -496,6 +506,7 @@ fun WeatherTile(props: TileContentProps) {
 
 @Composable
 fun CalendarTimelineTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     val events = props.calendarEvents
     val firstEv = events.firstOrNull()
     when (props.tier) {
@@ -564,19 +575,19 @@ fun CalendarTimelineTile(props: TileContentProps) {
                     Text("Tagesplan", color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    text = "● Jetzt 09:01",
+                    text = "● Jetzt ${hw.timeLabel}",
                     color = Color(0xFFEF4444),
                     style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
                 )
             }
 
-            // Red 09:01 current time marker line
+            // Red live current time marker line
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "09:01",
+                    text = hw.timeLabel,
                     color = Color(0xFFEF4444),
                     style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
                     modifier = Modifier.width(38.dp),
@@ -616,6 +627,7 @@ fun CalendarTimelineTile(props: TileContentProps) {
 
 @Composable
 fun CalendarTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     val events = props.calendarEvents
     val firstEv = events.firstOrNull()
     when (props.tier) {
@@ -625,7 +637,7 @@ fun CalendarTile(props: TileContentProps) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
-            Text("18", color = props.surface.textPrimary, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text(hw.dayOfMonthLabel, color = props.surface.textPrimary, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         TileSizeTier.TICKER -> Row(
             modifier = Modifier.fillMaxSize(),
@@ -779,6 +791,7 @@ fun RemindersTile(props: TileContentProps) {
 
 @Composable
 fun BatteryStepsTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     when (props.tier) {
         TileSizeTier.XS -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -786,15 +799,15 @@ fun BatteryStepsTile(props: TileContentProps) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(Icons.Rounded.BatteryChargingFull, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
-            Text("84%", color = props.surface.textPrimary, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text("${hw.batteryPercent}%", color = props.surface.textPrimary, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         TileSizeTier.TICKER -> Row(
             modifier = Modifier.fillMaxSize(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Akku 84 %", color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("7.420 Schritte", color = props.surface.textSecondary, fontSize = 13.sp)
+            Text("Akku ${hw.batteryPercent} %", color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("${hw.steps.formattedSteps} Schritte", color = props.surface.textSecondary, fontSize = 13.sp)
         }
         else -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Text("Status", color = props.surface.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -803,9 +816,9 @@ fun BatteryStepsTile(props: TileContentProps) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ProgressRingItem(0.84f, Color(0xFF22C55E), props.surface.accentBg, props.surface.textPrimary, props.surface.textSecondary, "Akku", "84%")
+                ProgressRingItem(hw.batteryPercent / 100f, Color(0xFF22C55E), props.surface.accentBg, props.surface.textPrimary, props.surface.textSecondary, "Akku", "${hw.batteryPercent}%")
                 if (props.tier != TileSizeTier.LIST) {
-                    ProgressRingItem(0.74f, props.surface.accentColor, props.surface.accentBg, props.surface.textPrimary, props.surface.textSecondary, "Schritte", "7,4k")
+                    ProgressRingItem(hw.steps.progressRatio, props.surface.accentColor, props.surface.accentBg, props.surface.textPrimary, props.surface.textSecondary, "Schritte", hw.steps.compactLabel)
                 }
             }
             if (props.heightDp >= 150f) {
@@ -813,8 +826,8 @@ fun BatteryStepsTile(props: TileContentProps) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("ca. 19 Std.", color = props.surface.textSecondary, fontSize = 10.5.sp)
-                    Text("5,4 km heute", color = props.surface.textSecondary, fontSize = 10.5.sp)
+                    Text(if (hw.isCharging) "Lädt (${hw.estimatedHoursLeft} Std.)" else "ca. ${hw.estimatedHoursLeft} Std.", color = props.surface.textSecondary, fontSize = 10.5.sp)
+                    Text("${hw.steps.distanceKmLabel} km heute", color = props.surface.textSecondary, fontSize = 10.5.sp)
                 }
             }
         }
@@ -846,10 +859,11 @@ private fun ProgressRingItem(
 
 @Composable
 fun BatteryTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     if (props.tier == TileSizeTier.XS) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Rounded.BatteryChargingFull, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(20.dp))
-            Text("84%", color = props.surface.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("${hw.batteryPercent}%", color = props.surface.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
     } else {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
@@ -857,18 +871,19 @@ fun BatteryTile(props: TileContentProps) {
                 Text("Akku", color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Icon(Icons.Rounded.BatteryChargingFull, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(18.dp))
             }
-            Text("84%", color = props.surface.textPrimary, style = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
-            Text("Noch ca. 19 Std.", color = props.surface.textSecondary, fontSize = 12.sp)
+            Text("${hw.batteryPercent}%", color = props.surface.textPrimary, style = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text(if (hw.isCharging) "Lädt gerade" else "Noch ca. ${hw.estimatedHoursLeft} Std.", color = props.surface.textSecondary, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
 fun StepsTile(props: TileContentProps) {
+    val hw = LocalHardwareTelemetry.current
     if (props.tier == TileSizeTier.XS) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
-            Text("7,4k", color = props.surface.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(hw.steps.compactLabel, color = props.surface.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
     } else {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
@@ -876,9 +891,9 @@ fun StepsTile(props: TileContentProps) {
                 Text("Schritte", color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(18.dp))
             }
-            Text("7.420", color = props.surface.textPrimary, style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text(hw.steps.formattedSteps, color = props.surface.textPrimary, style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
             Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(props.surface.accentBg)) {
-                Box(Modifier.fillMaxWidth(0.74f).fillMaxHeight().clip(CircleShape).background(props.surface.accentColor))
+                Box(Modifier.fillMaxWidth(hw.steps.progressRatio).fillMaxHeight().clip(CircleShape).background(props.surface.accentColor))
             }
         }
     }
@@ -895,7 +910,20 @@ fun NoteTile(props: TileContentProps) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(props.tile.title.ifBlank { "Notiz" }, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Icon(Icons.Rounded.Description, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(15.dp))
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(props.surface.accentBg)
+                        .clickable(enabled = !props.isEditMode) {
+                            props.onUpdateTile(props.leafId) { prev ->
+                                prev.copy(noteLines = EigenTileActions.addQuickNoteLine(prev.noteLines ?: lines))
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Notiz hinzufügen", tint = props.surface.accentColor, modifier = Modifier.size(13.dp))
+                }
             }
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 lines.take(if (props.tier == TileSizeTier.S) 2 else 3).forEach { line ->

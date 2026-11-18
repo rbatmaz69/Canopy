@@ -55,6 +55,7 @@ import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.layout.WidgetKind
 import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
+import app.canopy.launcher.system.LocalHardwareTelemetry
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import java.util.Locale
 import kotlin.math.max
@@ -173,17 +174,16 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
         return
     }
 
-    var bonusSteps by remember { mutableIntStateOf(0) }
+    val hw = LocalHardwareTelemetry.current
     val podcastDurationSec = 42 * 60
     val podcastElapsedSec = (props.mediaState.progress * podcastDurationSec).roundToInt()
     val podMm = (podcastElapsedSec / 60).toString().padStart(2, '0')
     val podSs = (podcastElapsedSec % 60).toString().padStart(2, '0')
     val activeBarCount = max(1, min(12, (props.mediaState.progress * 12f).roundToInt()))
 
-    val totalSteps = 7420 + bonusSteps
-    val fitnessPct = min(100, ((totalSteps / 10000f) * 100f).roundToInt())
-    val fitnessKcal = 420 + (bonusSteps * 0.045f).roundToInt()
-    val fitnessKm = String.format(Locale.GERMAN, "%.1f", 5.4f + bonusSteps * 0.00075f)
+    val fitnessPct = hw.steps.goalPercent
+    val fitnessKcal = hw.steps.kcal
+    val fitnessKm = hw.steps.distanceKmLabel
 
     val fitScale = WidgetFrameEngine.computeBreathingScale(props.widthDp, props.heightDp, fixedW, fixedH)
     val passepartoutBg = if (props.theme.isGlass) Color(0x24FFFFFF) else props.surface.accentBg
@@ -373,7 +373,7 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = String.format(Locale.GERMAN, "%,d", totalSteps),
+                                text = hw.steps.formattedSteps,
                                 color = innerText,
                                 style = TextStyle(fontSize = 21.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
                             )
@@ -387,7 +387,7 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
                                     .background(Color(0x3810B981))
                                     .clickable(enabled = !props.isEditMode) {
                                         CanopyHaptics.trigger(HapticKind.SNAP, props.motionSettings.hapticsEnabled)
-                                        bonusSteps += 250
+                                        hw.onAddBonusSteps(250)
                                     }
                                     .padding(horizontal = 7.dp, vertical = 3.dp),
                             )

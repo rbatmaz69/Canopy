@@ -4,6 +4,8 @@ dist/
 .DS_Store
 .gradle/
 build/
+app/build/
+*.apk
 local.properties
 .idea/
 *.iml

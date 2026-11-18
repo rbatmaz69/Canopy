@@ -25,7 +25,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardReturn
+import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
@@ -52,6 +54,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -72,6 +76,10 @@ import app.canopy.launcher.ui.tiles.ContactItem
 import app.canopy.launcher.ui.tiles.SettingItem
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
+import java.util.Locale
+import kotlin.math.abs
 
 data class WebSearchSpec(
     val intentAction: String,
@@ -147,6 +155,128 @@ object UniversalSearchEngine {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
+
+    fun buildContactDialUri(statusOrPhone: String): String? {
+        val trimmed = statusOrPhone.trim()
+        if (trimmed.isEmpty()) return null
+        val normalized = buildString {
+            trimmed.forEach { ch ->
+                if (ch.isDigit() || (ch == '+' && isEmpty())) append(ch)
+            }
+        }
+        val digitCount = normalized.count { it.isDigit() }
+        return if (digitCount >= 5) "tel:$normalized" else null
+    }
+
+    fun resolveSettingIntentAction(item: SettingItem): String =
+        item.intentAction.ifBlank { android.provider.Settings.ACTION_SETTINGS }
+
+    fun evaluateMathExpression(rawQuery: String): String? {
+        val trimmed = rawQuery.trim()
+        if (trimmed.isEmpty()) return null
+        val percentNormalized = Regex("""(\d+(?:[.,]\d+)?)\s*%\s*(?:von|of)\s*""", RegexOption.IGNORE_CASE)
+            .replace(trimmed) { mr -> "(${mr.groupValues[1]}/100)*" }
+        val normalized = percentNormalized
+            .replace(',', '.')
+            .replace('×', '*')
+            .replace('÷', '/')
+            .replace(" ", "")
+        if (!normalized.any { it in setOf('+', '-', '*', '/') }) return null
+        if (normalized.any { !it.isDigit() && it !in setOf('.', '+', '-', '*', '/', '(', ')') }) return null
+
+        val result = MathExprParser(normalized).parse() ?: return null
+        if (!result.isFinite() || abs(result) > 1e15) return null
+        val roundedZero = if (abs(result) < 1e-10) 0.0 else result
+        val fmt = DecimalFormat("0.####", DecimalFormatSymbols(Locale.GERMANY))
+        return fmt.format(roundedZero)
+    }
+
+    private class MathExprParser(private val s: String) {
+        private var pos = 0
+
+        fun parse(): Double? {
+            val value = parseExpression() ?: return null
+            return if (pos == s.length) value else null
+        }
+
+        private fun parseExpression(): Double? {
+            var left = parseTerm() ?: return null
+            while (pos < s.length) {
+                when (s[pos]) {
+                    '+' -> {
+                        pos++
+                        left += parseTerm() ?: return null
+                    }
+                    '-' -> {
+                        pos++
+                        left -= parseTerm() ?: return null
+                    }
+                    else -> break
+                }
+            }
+            return left
+        }
+
+        private fun parseTerm(): Double? {
+            var left = parseFactor() ?: return null
+            while (pos < s.length) {
+                when (s[pos]) {
+                    '*' -> {
+                        pos++
+                        left *= parseFactor() ?: return null
+                    }
+                    '/' -> {
+                        pos++
+                        val rhs = parseFactor() ?: return null
+                        if (abs(rhs) < 1e-12) return null
+                        left /= rhs
+                    }
+                    else -> break
+                }
+            }
+            return left
+        }
+
+        private fun parseFactor(): Double? {
+            if (pos >= s.length) return null
+            return when (s[pos]) {
+                '+' -> {
+                    pos++
+                    parseFactor()
+                }
+                '-' -> {
+                    pos++
+                    parseFactor()?.let { -it }
+                }
+                '(' -> {
+                    pos++
+                    val inside = parseExpression() ?: return null
+                    if (pos >= s.length || s[pos] != ')') return null
+                    pos++
+                    inside
+                }
+                else -> parseNumber()
+            }
+        }
+
+        private fun parseNumber(): Double? {
+            val start = pos
+            var dotSeen = false
+            while (pos < s.length) {
+                val ch = s[pos]
+                if (ch.isDigit()) {
+                    pos++
+                } else if (ch == '.' && !dotSeen) {
+                    dotSeen = true
+                    pos++
+                } else {
+                    break
+                }
+            }
+            if (pos == start) return null
+            return s.substring(start, pos).toDoubleOrNull()
+        }
+    }
 }
 
 @Composable
@@ -157,10 +287,15 @@ fun UniversalSearchOverlay(
     contactsCatalog: List<ContactItem> = MockCatalogData.CONTACTS_MOCK,
     onClose: () -> Unit,
     onOpenApp: (appId: String, sourceRect: Rect?) -> Unit,
+    onDialContact: (contact: ContactItem, sourceRect: Rect?) -> Unit = { _, r -> onOpenApp("app-telefon", r) },
+    onOpenSetting: (setting: SettingItem, sourceRect: Rect?) -> Unit = { _, r -> onOpenApp("app-einstellungen", r) },
     onSearchWeb: (query: String, sourceRect: Rect?) -> Unit,
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    var copiedCalc by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     val trimmedQuery = query.trim()
+    val mathResult = remember(query) { UniversalSearchEngine.evaluateMathExpression(query) }
     val results = remember(query, allAppsCatalog, contactsCatalog) {
         UniversalSearchEngine.filterAll(query, apps = allAppsCatalog, contacts = contactsCatalog)
     }
@@ -201,7 +336,10 @@ fun UniversalSearchOverlay(
                 }
                 BasicTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = {
+                        query = it
+                        copiedCalc = false
+                    },
                     singleLine = true,
                     textStyle = TextStyle(color = theme.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium),
                     cursorBrush = SolidColor(theme.pillActive),
@@ -250,6 +388,53 @@ fun UniversalSearchOverlay(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            if (mathResult != null) {
+                val calcSurf = theme.getTileSurface(160f, SurfaceEmphasis.NORMAL)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("SOFORT-RECHNER", color = theme.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 60.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Brush.linearGradient(listOf(calcSurf.backgroundStart, calcSurf.backgroundEnd)))
+                            .border(calcSurf.borderWidthDp.dp, calcSurf.borderColor, RoundedCornerShape(18.dp))
+                            .clickable {
+                                CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
+                                clipboardManager.setText(AnnotatedString(mathResult))
+                                copiedCalc = true
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Box(
+                                modifier = Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(calcSurf.accentBg),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Rounded.Calculate, contentDescription = null, tint = calcSurf.accentColor, modifier = Modifier.size(20.dp))
+                            }
+                            Column {
+                                Text("= $mathResult", color = calcSurf.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (copiedCalc) "Ergebnis kopiert ($trimmedQuery)" else "$trimmedQuery · Tippen zum Kopieren",
+                                    color = calcSurf.textSecondary,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = "Ergebnis kopieren", tint = calcSurf.accentColor, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
             if (UniversalSearchEngine.shouldShowBrowserCard(query)) {
                 val webSurf = theme.getTileSurface(199f, SurfaceEmphasis.NORMAL)
                 var cardBounds: Rect? = null
@@ -358,7 +543,7 @@ fun UniversalSearchOverlay(
                                         .onGloballyPositioned { cardRect = it.boundsInRoot() }
                                         .clickable {
                                             CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
-                                            onOpenApp("app-telefon", cardRect)
+                                            onDialContact(c, cardRect)
                                         }
                                         .padding(10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -397,7 +582,7 @@ fun UniversalSearchOverlay(
                                 .onGloballyPositioned { cardRect = it.boundsInRoot() }
                                 .clickable {
                                     CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
-                                    onOpenApp("app-einstellungen", cardRect)
+                                    onOpenSetting(s, cardRect)
                                 }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,

@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -838,6 +839,34 @@ fun CanopyLauncherApp(
                         hapticsEnabled = motionSettings.hapticsEnabled,
                         onClose = { showSearch = false },
                         onOpenApp = { appId, rect -> openAppWithBadgeSync(appId, rect, null) },
+                        onDialContact = { contact, rect ->
+                            val dialUri = UniversalSearchEngine.buildContactDialUri(contact.status)
+                            val launched = if (dialUri != null) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_DIAL, Uri.parse(dialUri)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                    )
+                                    true
+                                }.getOrDefault(false)
+                            } else false
+                            if (!launched) {
+                                openAppWithBadgeSync("app-telefon", rect, contact.name)
+                            }
+                        },
+                        onOpenSetting = { setting, rect ->
+                            val action = UniversalSearchEngine.resolveSettingIntentAction(setting)
+                            val launched = runCatching {
+                                context.startActivity(
+                                    Intent(action).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                )
+                                true
+                            }.getOrDefault(false)
+                            if (!launched) {
+                                openAppWithBadgeSync("app-einstellungen", rect, setting.name)
+                            }
+                        },
                         onSearchWeb = { query, rect ->
                             val intent = UniversalSearchEngine.buildBrowserSearchIntent(query)
                             runCatching { context.startActivity(intent) }

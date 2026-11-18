@@ -79,6 +79,8 @@ import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
+import app.canopy.launcher.system.InstalledAppsMapper
+import app.canopy.launcher.system.NativeShortcutEntry
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import app.canopy.launcher.ui.navigation.SharedElementExpandContainer
 import app.canopy.launcher.ui.theme.CanopyThemes
@@ -144,14 +146,20 @@ object ContextMenuPositioner {
         )
     }
 
-    fun shortcutsForTile(tile: TileData): List<String> = when (tile.type) {
-        TileType.CLOCK -> listOf("Wecker stellen", "Timer 25 Min.")
-        TileType.WEATHER, TileType.TEMP_CURVE, TileType.GREETING -> listOf("Regenradar öffnen", "Standort wechseln")
-        TileType.CALENDAR, TileType.CALENDAR_TIMELINE -> listOf("Neuer Termin", "Wochenansicht")
-        TileType.MEDIA -> listOf("Mix wechseln", "Warteschlange")
-        TileType.APP_GROUP -> listOf("Gruppe umbenennen", "Apps verwalten")
-        TileType.REMINDERS, TileType.NOTE -> listOf("Neuer Eintrag", "Alle abhaken")
-        else -> listOf("Schnellaktion", "App-Info")
+    fun shortcutsForTile(
+        tile: TileData,
+        nativeShortcuts: List<NativeShortcutEntry> = emptyList(),
+    ): List<String> {
+        val base = when (tile.type) {
+            TileType.CLOCK -> listOf("Wecker stellen", "Timer 25 Min.")
+            TileType.WEATHER, TileType.TEMP_CURVE, TileType.GREETING -> listOf("Regenradar öffnen", "Standort wechseln")
+            TileType.CALENDAR, TileType.CALENDAR_TIMELINE -> listOf("Neuer Termin", "Wochenansicht")
+            TileType.MEDIA -> listOf("Mix wechseln", "Warteschlange")
+            TileType.APP_GROUP -> listOf("Gruppe umbenennen", "Apps verwalten")
+            TileType.REMINDERS, TileType.NOTE -> listOf("Neuer Eintrag", "Alle abhaken")
+            else -> listOf("Schnellaktion", "App-Info")
+        }
+        return InstalledAppsMapper.mergeContextShortcuts(base, nativeShortcuts)
     }
 }
 
@@ -162,6 +170,7 @@ fun ContextMenuOverlay(
     containerHeightDp: Float,
     theme: ThemeTokens,
     hapticsEnabled: Boolean,
+    nativeShortcuts: List<NativeShortcutEntry> = emptyList(),
     onClose: () -> Unit,
     onEnterEditMode: () -> Unit,
     onQuickGrow: (pageId: String, leafId: String) -> Unit,
@@ -173,7 +182,9 @@ fun ContextMenuOverlay(
     val placement = remember(menu, containerWidthDp, containerHeightDp) {
         ContextMenuPositioner.computePlacement(menu.rectDp, containerWidthDp, containerHeightDp)
     }
-    val shortcuts = remember(menu.tile) { ContextMenuPositioner.shortcutsForTile(menu.tile) }
+    val shortcuts = remember(menu.tile, nativeShortcuts) {
+        ContextMenuPositioner.shortcutsForTile(menu.tile, nativeShortcuts)
+    }
 
     Box(
         modifier = Modifier

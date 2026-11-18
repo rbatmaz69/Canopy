@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.AlternateEmail
 import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bluetooth
@@ -193,6 +194,7 @@ object AppIconRegistry {
         "Settings" to Icons.Rounded.Settings,
         "ShoppingBag" to Icons.Rounded.ShoppingBag,
         "Sliders" to Icons.Rounded.Tune,
+        "Sparkles" to Icons.Rounded.AutoAwesome,
         "Sprout" to Icons.Rounded.Eco,
         "Sun" to Icons.Rounded.WbSunny,
         "Terminal" to Icons.Rounded.Terminal,

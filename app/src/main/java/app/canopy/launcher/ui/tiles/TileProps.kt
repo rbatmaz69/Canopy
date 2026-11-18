@@ -34,6 +34,7 @@ data class AppDefinition(
     val subtitle: String,
     val isNew: Boolean = false,
     val packageName: String? = null,
+    val componentActivityName: String? = null,
 )
 
 @Immutable

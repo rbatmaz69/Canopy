@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import app.canopy.launcher.data.AlarmState
 import app.canopy.launcher.data.ColorMode
@@ -53,6 +54,7 @@ import app.canopy.launcher.motion.HapticEvent
 import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.motion.HapticVisualFeedbackLayer
 import app.canopy.launcher.motion.SpringRole
+import app.canopy.launcher.system.DeviceAppsController
 import app.canopy.launcher.system.NotificationBadgeStore
 import app.canopy.launcher.ui.components.BottomDockBar
 import app.canopy.launcher.ui.components.IconStyleConfig
@@ -98,8 +100,16 @@ private const val APP_WIDGET_HOST_ID = 0xCA90
 @Composable
 fun CanopyLauncherApp() {
     val context = LocalContext.current
+    val rootView = LocalView.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
+
+    val deviceAppsController = remember(context) { DeviceAppsController(context) }
+    DisposableEffect(deviceAppsController) {
+        deviceAppsController.startListening()
+        onDispose { deviceAppsController.stopListening() }
+    }
+    val liveAppsCatalog by deviceAppsController.catalogFlow.collectAsState()
 
     val store = remember(context) { SharedPreferencesLauncherStore(context) }
     val initialState = remember {
@@ -263,16 +273,16 @@ fun CanopyLauncherApp() {
 
         val openAppWithBadgeSync: (String, Rect?, String?) -> Unit = { appId, sourceRect, shortcut ->
             NotificationBadgeStore.onAppOpened(appId)
-            val appDef = MockCatalogData.APPS_BY_ID[appId]
-            val launchedReal = appDef?.packageName?.let { pkg ->
-                runCatching {
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
-                    if (launchIntent != null) {
-                        context.startActivity(launchIntent)
-                        true
-                    } else false
-                }.getOrDefault(false)
-            } ?: false
+            val appDef = liveAppsCatalog.firstOrNull { it.id == appId } ?: MockCatalogData.APPS_BY_ID[appId]
+            val launchedReal = deviceAppsController.launchApp(
+                rootView = rootView,
+                appDef = appDef,
+                sourceRectDp = sourceRect,
+                density = density.density,
+                screenWidthPx = screenWidthPx.toInt(),
+                screenHeightPx = screenHeightPx.toInt(),
+                shortcutLabel = shortcut,
+            )
 
             if (!launchedReal) {
                 fakeApp = FakeAppTarget(
@@ -465,7 +475,7 @@ fun CanopyLauncherApp() {
                             calendarEvents = calendarEvents,
                             mediaState = mediaState,
                             systemState = systemState,
-                            allAppsCatalog = MockCatalogData.APPS_CATALOG,
+                            allAppsCatalog = liveAppsCatalog,
                         )
                     }
 
@@ -537,7 +547,7 @@ fun CanopyLauncherApp() {
                     calendarEvents = calendarEvents,
                     mediaState = mediaState,
                     systemState = systemState,
-                    allAppsCatalog = MockCatalogData.APPS_CATALOG,
+                    allAppsCatalog = liveAppsCatalog,
                 )
 
                 if (showQuickShade) {
@@ -556,12 +566,19 @@ fun CanopyLauncherApp() {
                 }
 
                 contextMenu?.let { menu ->
+                    val nativeShortcuts = remember(menu.tile, liveAppsCatalog) {
+                        val appDef = menu.tile.appId?.let { id ->
+                            liveAppsCatalog.firstOrNull { it.id == id } ?: MockCatalogData.APPS_BY_ID[id]
+                        }
+                        deviceAppsController.queryShortcutsForApp(appDef)
+                    }
                     ContextMenuOverlay(
                         menu = menu,
                         containerWidthDp = screenWidthDp,
                         containerHeightDp = screenHeightDp,
                         theme = theme,
                         hapticsEnabled = motionSettings.hapticsEnabled,
+                        nativeShortcuts = nativeShortcuts,
                         onClose = { contextMenu = null },
                         onEnterEditMode = {
                             contextMenu = null
@@ -634,6 +651,7 @@ fun CanopyLauncherApp() {
                             tile = liveLeaf.tile,
                             initialMode = mode,
                             theme = theme,
+                            allAppsCatalog = liveAppsCatalog,
                             onClose = { openGroupState = null },
                             onOpenApp = { appId, rect -> openAppWithBadgeSync(appId, rect, null) },
                             onUpdateGroup = { updater ->
@@ -648,6 +666,7 @@ fun CanopyLauncherApp() {
                 if (showSearch) {
                     UniversalSearchOverlay(
                         theme = theme,
+                        allAppsCatalog = liveAppsCatalog,
                         hapticsEnabled = motionSettings.hapticsEnabled,
                         onClose = { showSearch = false },
                         onOpenApp = { appId, rect -> openAppWithBadgeSync(appId, rect, null) },
@@ -730,6 +749,7 @@ fun CanopyLauncherApp() {
                         containerHeightPx = screenHeightPx,
                         theme = theme,
                         motionSettings = motionSettings,
+                        allAppsCatalog = liveAppsCatalog,
                         calendarEvents = calendarEvents,
                         onAddCalendarEvent = { ev -> calendarEvents = listOf(ev) + calendarEvents },
                         mediaState = mediaState,

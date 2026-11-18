@@ -74,4 +74,25 @@ class CanopyThemesTest {
             }
         }
     }
+
+    @Test
+    fun `rgbToHue extracts primary hues and overrideBaseHue adapts Material You palette`() {
+        assertEquals(0f, CanopyThemes.rgbToHue(255, 0, 0), 0.1f)
+        assertEquals(120f, CanopyThemes.rgbToHue(0, 255, 0), 0.1f)
+        assertEquals(240f, CanopyThemes.rgbToHue(0, 0, 255), 0.1f)
+        assertEquals(215f, CanopyThemes.rgbToHue(128, 128, 128), 0.1f)
+
+        val defaultTokens = CanopyThemes.getThemeTokens(ThemeVariantId.MATERIAL_YOU, ColorMode.LIGHT, WallpaperPresetId.SAND)
+        val extractedGreen = CanopyThemes.getThemeTokens(
+            ThemeVariantId.MATERIAL_YOU,
+            ColorMode.LIGHT,
+            WallpaperPresetId.SAND,
+            overrideBaseHue = 120f,
+        )
+        assertNotEquals(defaultTokens.pillActive, extractedGreen.pillActive)
+        assertNotEquals(
+            defaultTokens.getTileSurface(accentHue = null).backgroundStart,
+            extractedGreen.getTileSurface(accentHue = null).backgroundStart,
+        )
+    }
 }

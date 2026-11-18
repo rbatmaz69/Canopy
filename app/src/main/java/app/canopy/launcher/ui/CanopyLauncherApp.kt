@@ -1,11 +1,13 @@
 package app.canopy.launcher.ui
 
 import android.app.Activity
+import android.app.WallpaperManager
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -365,7 +367,25 @@ fun CanopyLauncherApp(
         onDispose { unsub() }
     }
 
-    val theme = CanopyThemes.getThemeTokens(themeId, colorMode, wallpaperId)
+    val systemWallpaperHue = remember(context, useSystemWallpaper) {
+        if (!useSystemWallpaper) null
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            runCatching {
+                val color = WallpaperManager.getInstance(context)
+                    .getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+                    ?.primaryColor
+                color?.let { c ->
+                    CanopyThemes.rgbToHue(
+                        (c.red() * 255f).toInt(),
+                        (c.green() * 255f).toInt(),
+                        (c.blue() * 255f).toInt(),
+                    )
+                }
+            }.getOrNull()
+        } else null
+    }
+
+    val theme = CanopyThemes.getThemeTokens(themeId, colorMode, wallpaperId, overrideBaseHue = systemWallpaperHue)
     val iconStyle = IconStyleConfig(
         tonalIcons = tonalIcons,
         themeId = themeId,
@@ -964,6 +984,20 @@ fun CanopyLauncherApp(
                                     )
                                 }
                             }
+                        },
+                        onChangeTileAccentHue = { pageId, leafId, hue ->
+                            contextMenu = null
+                            updatePagesWithHistory(
+                                pages.map { p ->
+                                    if (p.id == pageId) {
+                                        p.copy(
+                                            root = TilingEngine.updateLeafTile(p.root, leafId) { prev ->
+                                                prev.copy(accentHue = hue)
+                                            }
+                                        )
+                                    } else p
+                                }
+                            )
                         },
                     )
                 }

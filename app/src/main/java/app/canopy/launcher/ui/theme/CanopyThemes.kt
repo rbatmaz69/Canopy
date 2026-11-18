@@ -140,6 +140,25 @@ object CanopyThemes {
     }
 
     /**
+     * Pure Kotlin RGB (0..255) -> Hue (0..360) conversion for Material You wallpaper extraction.
+     */
+    fun rgbToHue(r: Int, g: Int, b: Int): Float {
+        val rf = r.coerceIn(0, 255) / 255f
+        val gf = g.coerceIn(0, 255) / 255f
+        val bf = b.coerceIn(0, 255) / 255f
+        val maxC = maxOf(rf, gf, bf)
+        val minC = minOf(rf, gf, bf)
+        val delta = maxC - minC
+        if (delta < 1e-4f) return 215f
+        val rawHue = when (maxC) {
+            rf -> ((gf - bf) / delta) % 6f
+            gf -> ((bf - rf) / delta) + 2f
+            else -> ((rf - gf) / delta) + 4f
+        } * 60f
+        return clampHue(rawHue, 215f)
+    }
+
+    /**
      * Pure Kotlin HSL -> Compose Color conversion (independent of android.graphics.Color for unit tests).
      */
     fun hslColor(hDeg: Float, sPct: Float, lPct: Float, alpha: Float = 1f): Color {
@@ -172,8 +191,11 @@ object CanopyThemes {
         id: ThemeVariantId,
         mode: ColorMode,
         wallpaperId: WallpaperPresetId = WallpaperPresetId.SAND,
+        overrideBaseHue: Float? = null,
     ): ThemeTokens {
         val wpAccent = WALLPAPER_ACCENTS[wallpaperId] ?: WALLPAPER_ACCENTS.getValue(WallpaperPresetId.SAND)
+        val effectiveBaseHue = overrideBaseHue?.let { clampHue(it, wpAccent.baseHue) } ?: wpAccent.baseHue
+        val hasCustomBaseHue = overrideBaseHue != null
 
         return when (id) {
             ThemeVariantId.MATERIAL_YOU -> {
@@ -196,18 +218,22 @@ object CanopyThemes {
                     sheetBorder = if (isDark) Color(0x1FFFF0DC) else Color(0x1A463422),
                     overlayBackdrop = if (isDark) Color(0xA60F0D0A) else Color(0x592A2218),
                     pillBg = if (isDark) Color(0x47FFF4E4) else Color(0x4030261C),
-                    pillActive = if (isDark) wpAccent.pillDark else wpAccent.pillLight,
+                    pillActive = when {
+                        hasCustomBaseHue -> if (isDark) hslColor(effectiveBaseHue, 70f, 82f) else hslColor(effectiveBaseHue, 65f, 22f)
+                        isDark -> wpAccent.pillDark
+                        else -> wpAccent.pillLight
+                    },
                     dividerHandleBg = if (isDark) wpAccent.dividerDark else wpAccent.dividerLight,
                     dividerHandleDot = if (isDark) Color(0xFF2A2218) else Color(0xFFFAF3EA),
                     isGlass = false,
                     isBold = false,
                     blurDp = 0f,
                     surfaceFactory = { accentHue, emphasis ->
-                        val rawH = clampHue(accentHue, wpAccent.baseHue)
-                        val h = if (wallpaperId == WallpaperPresetId.SAND) {
+                        val rawH = clampHue(accentHue, effectiveBaseHue)
+                        val h = if (wallpaperId == WallpaperPresetId.SAND && !hasCustomBaseHue) {
                             rawH
                         } else {
-                            ((rawH * 0.38f + wpAccent.baseHue * 0.62f).roundToInt() % 360).toFloat()
+                            ((rawH * 0.38f + effectiveBaseHue * 0.62f).roundToInt() % 360).toFloat()
                         }
                         if (isDark) {
                             val l = when (emphasis) {
@@ -283,11 +309,11 @@ object CanopyThemes {
                     isBold = true,
                     blurDp = 0f,
                     surfaceFactory = { accentHue, emphasis ->
-                        val rawH = clampHue(accentHue, wpAccent.baseHue)
-                        val h = if (wallpaperId == WallpaperPresetId.SAND) {
+                        val rawH = clampHue(accentHue, effectiveBaseHue)
+                        val h = if (wallpaperId == WallpaperPresetId.SAND && !hasCustomBaseHue) {
                             rawH
                         } else {
-                            ((rawH * 0.65f + wpAccent.baseHue * 0.35f).roundToInt() % 360).toFloat()
+                            ((rawH * 0.65f + effectiveBaseHue * 0.35f).roundToInt() % 360).toFloat()
                         }
                         if (isLight) {
                             val bgL = when (emphasis) {

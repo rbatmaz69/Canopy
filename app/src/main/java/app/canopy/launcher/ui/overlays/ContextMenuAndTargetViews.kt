@@ -209,6 +209,7 @@ fun ContextMenuOverlay(
     onRemoveTile: (pageId: String, leafId: String) -> Unit,
     onShowInfo: (tile: TileData, rectDp: Rect) -> Unit,
     onShortcutAction: (label: String, tile: TileData, rectDp: Rect) -> Unit,
+    onChangeTileAccentHue: (pageId: String, leafId: String, hue: Float?) -> Unit = { _, _, _ -> },
 ) {
     val placement = remember(menu, containerWidthDp, containerHeightDp) {
         ContextMenuPositioner.computePlacement(menu.rectDp, containerWidthDp, containerHeightDp)
@@ -280,6 +281,39 @@ fun ContextMenuOverlay(
                 CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
                 onShowInfo(menu.tile, menu.rectDp)
             }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                listOf<Float?>(null, 215f, 160f, 38f, 271f, 330f).forEach { swatchHue ->
+                    val active = menu.tile.accentHue == swatchHue
+                    val swatchColor = if (swatchHue == null) {
+                        theme.pillActive
+                    } else {
+                        CanopyThemes.hslColor(swatchHue, 78f, 54f)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(swatchColor)
+                            .border(
+                                width = if (active) 2.dp else 1.dp,
+                                color = if (active) theme.textPrimary else theme.sheetBorder,
+                                shape = CircleShape,
+                            )
+                            .clickable {
+                                CanopyHaptics.trigger(HapticKind.TICK, hapticsEnabled)
+                                onChangeTileAccentHue(menu.pageId, menu.leafId, swatchHue)
+                            },
+                    )
+                }
+            }
+
             ContextMenuRow(Icons.Rounded.Delete, "Von Seite entfernen", Color(0xFFEF4444)) {
                 CanopyHaptics.trigger(HapticKind.REMOVE, hapticsEnabled)
                 onRemoveTile(menu.pageId, menu.leafId)

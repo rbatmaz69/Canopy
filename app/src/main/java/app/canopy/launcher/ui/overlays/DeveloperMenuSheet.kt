@@ -26,8 +26,10 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.Wallpaper
@@ -36,7 +38,13 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +65,18 @@ import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.ui.theme.CanopyThemes
 import java.util.Locale
+import kotlin.math.roundToInt
+
+object FrameMetricsMath {
+    fun computeRollingFps(frameDeltasNanos: List<Long>): Pair<Int, Float> {
+        val valid = frameDeltasNanos.filter { it > 0L }
+        if (valid.isEmpty()) return 0 to 0f
+        val avgNs = valid.sum().toDouble() / valid.size.toDouble()
+        val avgMs = (avgNs / 1_000_000.0).toFloat()
+        val fps = (1_000_000_000.0 / avgNs).roundToInt().coerceIn(0, 240)
+        return fps to avgMs
+    }
+}
 
 @Composable
 fun DeveloperMenuSheet(
@@ -69,6 +89,7 @@ fun DeveloperMenuSheet(
     motionSettings: MotionSettings,
     showHapticHud: Boolean,
     useSystemWallpaper: Boolean = false,
+    showFpsHud: Boolean = false,
     backupStatusMessage: String? = null,
     onClose: () -> Unit,
     onChangeThemeId: (ThemeVariantId) -> Unit,
@@ -78,6 +99,8 @@ fun DeveloperMenuSheet(
     onChangeShortcutBarMode: (ShortcutBarMode) -> Unit,
     onChangeMotionSettings: (MotionSettings) -> Unit,
     onChangeShowHapticHud: (Boolean) -> Unit,
+    onChangeShowFpsHud: (Boolean) -> Unit = {},
+    onOpenGestureGuide: () -> Unit = {},
     onChangeUseSystemWallpaper: (Boolean) -> Unit = {},
     onRequestDefaultHome: () -> Unit = {},
     onExportLayoutJson: () -> Unit = {},
@@ -298,6 +321,28 @@ fun DeveloperMenuSheet(
                         onChangeUseSystemWallpaper(!useSystemWallpaper)
                     },
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    DevToggleBtn(
+                        icon = Icons.Rounded.Speed,
+                        label = "FPS-HUD: ${if (showFpsHud) "An" else "Aus"}",
+                        active = showFpsHud,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
+                            onChangeShowFpsHud(!showFpsHud)
+                        },
+                    )
+                    DevToggleBtn(
+                        icon = Icons.Rounded.Info,
+                        label = "Gesten-Guide",
+                        active = false,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
+                            onOpenGestureGuide()
+                        },
+                    )
+                }
             }
 
             // 4. Reihe
@@ -477,5 +522,137 @@ private fun DevToggleBtn(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+fun LiveFpsHudOverlay(modifier: Modifier = Modifier) {
+    var fps by remember { mutableIntStateOf(60) }
+    var frameMs by remember { mutableFloatStateOf(16.6f) }
+
+    LaunchedEffect(Unit) {
+        val deltas = ArrayDeque<Long>(30)
+        var lastFrameNs = 0L
+        while (true) {
+            withFrameNanos { nowNs ->
+                if (lastFrameNs > 0L) {
+                    val delta = nowNs - lastFrameNs
+                    if (deltas.size >= 24) deltas.removeFirst()
+                    deltas.addLast(delta)
+                    val (nextFps, nextMs) = FrameMetricsMath.computeRollingFps(deltas.toList())
+                    fps = nextFps
+                    frameMs = nextMs
+                }
+                lastFrameNs = nowNs
+            }
+        }
+    }
+
+    val badgeColor = when {
+        fps >= 55 -> Color(0xFF34D399)
+        fps >= 35 -> Color(0xFFFBBF24)
+        else -> Color(0xFFF87171)
+    }
+
+    Row(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color(0xD90F172A))
+            .border(1.dp, badgeColor.copy(alpha = 0.6f), CircleShape)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(badgeColor)
+        )
+        Text(
+            text = String.format(Locale.US, "%d FPS · %.1f ms", fps, frameMs),
+            color = Color.White,
+            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+@Composable
+fun GestureCheatSheetDialog(onClose: () -> Unit) {
+    val entries = remember {
+        listOf(
+            "Nach oben wischen" to "Universelle Suche (Apps, Kontakte, Web) öffnen",
+            "Nach unten wischen" to "Schnelleinstellungen & Mitteilungen öffnen",
+            "Zwei Finger zusammenziehen" to "Seitenübersicht (Umbenennen, Duplizieren, Startseite)",
+            "Kachel gedrückt halten" to "Kontextmenü mit App-Shortcuts & Farbwahl öffnen",
+            "Trennlinie gedrückt halten" to "Trennlinien- & Layout-Bearbeitungsmodus starten",
+            "Trennlinie doppelt tippen" to "Teilung Horizontal ↔ Vertikal wechseln",
+            "2D-Kreuzung ziehen" to "Zwei angrenzende Teilungen gleichzeitig skalieren",
+            "Kachel an Rand ziehen" to "Während Drag zur Nachbarseite blättern",
+            "App auf Gruppe ziehen" to "App direkt in eine Bento-Gruppe einsortieren",
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0x94000000))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClose() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .heightIn(max = 540.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xF7111827))
+                .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(24.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { /* consume */ }
+                .padding(18.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("Canopy Gesten-Guide", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("Alle Navigations- & Tiling-Gesten im Überblick", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                }
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x1FFFFFFF))
+                        .clickable { onClose() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Schließen", tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+            }
+
+            entries.forEach { (gesture, desc) ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0x0DFFFFFF))
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(gesture, color = Color(0xFF38BDF8), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    Text(desc, color = Color(0xFFE2E8F0), fontSize = 12.sp)
+                }
+            }
+        }
     }
 }

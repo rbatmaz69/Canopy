@@ -37,7 +37,7 @@ Die native Android-Umsetzung (`app.canopy.launcher`, `minSdk = 26`, `targetSdk =
 ./gradlew testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug --no-daemon
 ```
 
-* Unit-Tests: **92 JVM-Tests** über alle 27 Test-Suiten in `app/src/test/java/app/canopy/launcher/` (Tiling-Geometrie, Snap-Physik, Hysterese, Bento-Grid, Themen, Gesten, Drag & Drop, Suche, Badges, Widgets, Geräte-App-Katalog, MediaSession/Kalender/Kontakte-Bridge, WindowInsets, Hardware-Telemetrie, App-Icons, Home/Backup-Flow, Smart Search, Usage-Boost & Open-Meteo Live-Wetter).
+* Unit-Tests: **105 JVM-Tests** über alle 30 Test-Suiten in `app/src/test/java/app/canopy/launcher/` (Tiling-Geometrie, Snap-Physik, Hysterese, Bento-Grid, Themen, Gesten, Drag & Drop, Suche, Badges, Widgets, Geräte-App-Katalog, MediaSession/Kalender/Kontakte-Bridge, WindowInsets, Hardware-Telemetrie, App-Icons, Home/Backup-Flow, Smart Search, Usage-Boost, Open-Meteo Live-Wetter, Display-Helligkeit, Notification Deep-Links, persistente Editoren, Drag-into-Group, Material You `WallpaperColors`, `updateAppWidgetSize`, TalkBack-Semantik & FPS-Telemetrie).
 * UI-Tests & CI: Instrumentierte Compose-Tests unter `app/src/androidTest/java/app/canopy/launcher/` sowie automatisierte GitHub Actions Pipeline ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 * Debug-APK: `app/build/outputs/apk/debug/app-debug.apk` (z. B. per `adb install -r app/build/outputs/apk/debug/app-debug.apk` installierbar).
 
@@ -80,7 +80,7 @@ npx vitest run
 
 ## Roadmap (Meilensteine)
 
-Alle **9 Meilensteine (`M1`–`M9`, Issues `#1`–`#27`)** der nativen Android-Umsetzung inklusive Smart Search, lernender Sortierung, Undo/Redo-History, Hardware-Telemetrie, Open-Meteo Live-Wetter & CI sind abgeschlossen:
+Alle **12 Meilensteine (`M1`–`M12`, Issues `#1`–`#36`)** der nativen Android-Umsetzung sind vollständig implementiert, getestet und abgeschlossen:
 
 1. ✅ **M1:** Architektur & Tiling-Baum-Engine (Core Foundation) – `#1`–`#3`
 2. ✅ **M2:** Design-System, Themes & Adaptive Kachel-Typen – `#4`–`#6`
@@ -91,3 +91,6 @@ Alle **9 Meilensteine (`M1`–`M9`, Issues `#1`–`#27`)** der nativen Android-U
 7. ✅ **M7:** Real-Device OS Integration (`LauncherApps`, `MediaSession`, `CalendarContract`, `ContactsContract`, nativer `AppWidgetHost`-Picker, dynamische `WindowInsets`, System-Wallpaper, Compose `androidTest` & GitHub Actions CI) – `#19`–`#21`
 8. ✅ **M8:** Full Hardware, Live-Clock & Home-Role Polish (Live-Systemuhr, Tageszeit-Begrüßung, `BatteryManager`, `CameraManager`-Taschenlampe, `Sensor.TYPE_STEP_COUNTER`-Sync, native App-Icon-Bitmaps, App-Details-Intent, `HOME onNewIntent`, Standard-Launcher-Rolle, JSON Layout-Backup & R8-Regeln) – `#22`–`#24`
 9. ✅ **M9:** Smart Search, All-Apps Actions, Edit Undo/Redo & Live Weather (Sofort-Rechner, `ACTION_DIAL`, Settings-Intents, Alle-Apps Long-Press-Menü, persistente Nutzungs-Sortierung, `VelocityTracker`-Wurfphysik, `EditHistoryState` Undo/Redo & Open-Meteo Live-Wetter) – `#25`–`#27`
+10. ✅ **M10:** Live-Brightness, Notification Deep-Links, Persistent Editors & Photo/Weather Views (`window.attributes.screenBrightness`, Quick-Settings Long-Press-Panels, `PendingIntent`-Deep-Links & System-Cancel, persistente Vollbild-Editoren, Seiten-Umbenennen/Duplizieren, Galerie-Foto-Picker & interaktive Wetter-Vollansicht mit DACH-Städten) – `#28`–`#30`
+11. ✅ **M11:** One-Handed Gestures, Drag-into-Group & Dynamic Wallpaper Theming (Einhand-Swipe-Down für Quick-Settings-Shade, Drag-into-Group für Bento-Ordner, Gruppen-Sortierung & Akzentfarben, Material You `WallpaperColors`-Extraktion & 6-Farben-Swatches im Kontextmenü) – `#31`–`#33`
+12. ✅ **M12:** Responsive AppWidget Sizing, Context-Aware Drop Badges, Accessibility & FPS HUD (`updateAppWidgetSize`, `ACTION_APPWIDGET_CONFIGURE`, kontextsensitive Drop-Badges, TalkBack-`stateDescription`-Semantik, interaktiver Gesten-Guide & Live-FPS/Frame-Time-HUD) – `#34`–`#36`

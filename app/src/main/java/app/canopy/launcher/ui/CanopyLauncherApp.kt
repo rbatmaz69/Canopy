@@ -236,6 +236,8 @@ fun CanopyLauncherApp(
     var isEditMode by remember { mutableStateOf(false) }
     var showDevMenu by remember { mutableStateOf(false) }
     var showHapticHud by remember { mutableStateOf(false) }
+    var showFpsHud by remember { mutableStateOf(false) }
+    var showGestureGuide by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showQuickShade by remember { mutableStateOf(false) }
     var showCatalog by remember { mutableStateOf(false) }
@@ -478,6 +480,7 @@ fun CanopyLauncherApp(
                 showCatalog -> showCatalog = false
                 showPageOverview -> showPageOverview = false
                 showQuickShade -> showQuickShade = false
+                showGestureGuide -> showGestureGuide = false
                 showDevMenu -> showDevMenu = false
                 isEditMode -> isEditMode = false
             }
@@ -511,7 +514,7 @@ fun CanopyLauncherApp(
         }
 
         val hasAnyOverlay = fakeApp != null || openGroupState != null || showSearch ||
-            contextMenu != null || showCatalog || showPageOverview || showQuickShade || showDevMenu
+            contextMenu != null || showCatalog || showPageOverview || showQuickShade || showGestureGuide || showDevMenu
 
         BackHandler(enabled = hasAnyOverlay || isEditMode) {
             handleBackAction()
@@ -1257,6 +1260,7 @@ fun CanopyLauncherApp(
                     motionSettings = motionSettings,
                     showHapticHud = showHapticHud,
                     useSystemWallpaper = useSystemWallpaper,
+                    showFpsHud = showFpsHud,
                     backupStatusMessage = backupStatusMessage,
                     onClose = {
                         backupStatusMessage = null
@@ -1272,6 +1276,11 @@ fun CanopyLauncherApp(
                     },
                     onChangeMotionSettings = { motionSettings = it },
                     onChangeShowHapticHud = { showHapticHud = it },
+                    onChangeShowFpsHud = { showFpsHud = it },
+                    onOpenGestureGuide = {
+                        showDevMenu = false
+                        showGestureGuide = true
+                    },
                     onChangeUseSystemWallpaper = { useSystemWallpaper = it },
                     onRequestDefaultHome = {
                         val roleIntent = homeRoleAndBackupController.buildDefaultLauncherRoleIntent()
@@ -1332,6 +1341,20 @@ fun CanopyLauncherApp(
                         snapToPage(startPageIdx, 0f)
                     },
                 )
+
+                if (showGestureGuide) {
+                    app.canopy.launcher.ui.overlays.GestureCheatSheetDialog(
+                        onClose = { showGestureGuide = false },
+                    )
+                }
+
+                if (showFpsHud) {
+                    app.canopy.launcher.ui.overlays.LiveFpsHudOverlay(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = (statusBarH + 8).dp, end = 12.dp),
+                    )
+                }
 
                 HapticVisualFeedbackLayer(
                     latestEvent = latestHaptic,

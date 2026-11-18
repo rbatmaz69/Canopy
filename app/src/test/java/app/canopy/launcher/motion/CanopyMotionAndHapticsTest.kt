@@ -67,4 +67,23 @@ class CanopyMotionAndHapticsTest {
             unsubscribe()
         }
     }
+
+    @Test
+    fun `FrameMetricsMath computes rolling FPS and frame time accurately`() {
+        val (emptyFps, emptyMs) = app.canopy.launcher.ui.overlays.FrameMetricsMath.computeRollingFps(emptyList())
+        assertEquals(0, emptyFps)
+        assertEquals(0f, emptyMs, 1e-4f)
+
+        val (fps60, ms60) = app.canopy.launcher.ui.overlays.FrameMetricsMath.computeRollingFps(
+            listOf(16_666_667L, 16_666_667L, 16_666_667L)
+        )
+        assertEquals(60, fps60)
+        assertEquals(16.666f, ms60, 0.05f)
+
+        val (fps120, ms120) = app.canopy.launcher.ui.overlays.FrameMetricsMath.computeRollingFps(
+            listOf(8_333_333L, 8_333_333L)
+        )
+        assertEquals(120, fps120)
+        assertEquals(8.333f, ms120, 0.05f)
+    }
 }

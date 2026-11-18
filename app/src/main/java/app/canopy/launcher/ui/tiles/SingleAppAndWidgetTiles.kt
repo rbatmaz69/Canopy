@@ -2,6 +2,7 @@ package app.canopy.launcher.ui.tiles
 
 import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
+import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +69,13 @@ import kotlin.math.roundToInt
  */
 val LocalAppWidgetHostFactory = staticCompositionLocalOf<((Int) -> AppWidgetHostView?)?> { null }
 
+data class WidgetSizeRangeDp(
+    val minWidthDp: Int,
+    val minHeightDp: Int,
+    val maxWidthDp: Int,
+    val maxHeightDp: Int,
+)
+
 object WidgetFrameEngine {
     const val PASSEPARTOUT_MARGIN_DP = 10f
 
@@ -86,6 +95,26 @@ object WidgetFrameEngine {
     ): Float {
         val raw = min((tileWidthDp - 20f) / max(1f, fixedWidthDp), (tileHeightDp - 42f) / max(1f, fixedHeightDp))
         return min(1.15f, max(0.95f, raw))
+    }
+
+    fun computeWidgetSizeBundleRanges(
+        tileWidthDp: Float,
+        tileHeightDp: Float,
+        fixedWidthDp: Float,
+        fixedHeightDp: Float,
+    ): WidgetSizeRangeDp {
+        val usableW = max(56f, tileWidthDp - 16f)
+        val usableH = max(56f, tileHeightDp - 34f)
+        val minW = max(48, min(usableW, fixedWidthDp).roundToInt())
+        val minH = max(48, min(usableH, fixedHeightDp).roundToInt())
+        val maxW = max(minW, usableW.roundToInt())
+        val maxH = max(minH, usableH.roundToInt())
+        return WidgetSizeRangeDp(
+            minWidthDp = minW,
+            minHeightDp = minH,
+            maxWidthDp = maxW,
+            maxHeightDp = maxH,
+        )
     }
 }
 
@@ -261,6 +290,24 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
             }
 
             if (hostView != null) {
+                LaunchedEffect(hostView, props.widthDp, props.heightDp, fixedW, fixedH) {
+                    val ranges = WidgetFrameEngine.computeWidgetSizeBundleRanges(
+                        tileWidthDp = props.widthDp,
+                        tileHeightDp = props.heightDp,
+                        fixedWidthDp = fixedW,
+                        fixedHeightDp = fixedH,
+                    )
+                    runCatching {
+                        @Suppress("DEPRECATION")
+                        hostView.updateAppWidgetSize(
+                            Bundle.EMPTY,
+                            ranges.minWidthDp,
+                            ranges.minHeightDp,
+                            ranges.maxWidthDp,
+                            ranges.maxHeightDp,
+                        )
+                    }
+                }
                 AndroidView(
                     factory = { hostView },
                     modifier = Modifier

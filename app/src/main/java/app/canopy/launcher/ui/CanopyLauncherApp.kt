@@ -521,8 +521,9 @@ fun CanopyLauncherApp(
         val activePage = pages.getOrNull(activePageIndex)
         val gapDp = if (isEditMode) theme.gapEditDp else theme.gapUseDp
 
-        // Pending AppWidget bind flow
+        // Pending AppWidget bind + optional configure flow
         var pendingWidgetBind by remember { mutableStateOf<Pair<Int, NativeWidgetProviderSpec>?>(null) }
+        var pendingWidgetConfigure by remember { mutableStateOf<Pair<Int, NativeWidgetProviderSpec>?>(null) }
         val insertBoundWidget: (Int, NativeWidgetProviderSpec) -> Unit = { widgetId, spec ->
             val targetPage = pages.getOrNull(activePageIndex)
             if (targetPage != null && targetPage.kind != PageKind.ALL_APPS) {
@@ -538,6 +539,41 @@ fun CanopyLauncherApp(
             }
             showCatalog = false
         }
+        val widgetConfigureLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val pending = pendingWidgetConfigure
+            pendingWidgetConfigure = null
+            if (pending != null) {
+                val (widgetId, spec) = pending
+                if (result.resultCode == Activity.RESULT_OK) {
+                    insertBoundWidget(widgetId, spec)
+                } else {
+                    runCatching { appWidgetHost?.deleteAppWidgetId(widgetId) }
+                }
+            }
+        }
+        val completeBoundWidgetOrConfigure: (Int, NativeWidgetProviderSpec) -> Unit = { widgetId, spec ->
+            val info = runCatching { appWidgetManager?.getAppWidgetInfo(widgetId) }.getOrNull()
+            val configureComponent = info?.configure
+            if (configureComponent != null) {
+                pendingWidgetConfigure = widgetId to spec
+                val cfgIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
+                    component = configureComponent
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                }
+                val launched = runCatching {
+                    widgetConfigureLauncher.launch(cfgIntent)
+                    true
+                }.getOrDefault(false)
+                if (!launched) {
+                    pendingWidgetConfigure = null
+                    insertBoundWidget(widgetId, spec)
+                }
+            } else {
+                insertBoundWidget(widgetId, spec)
+            }
+        }
         val widgetBindLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
         ) { result ->
@@ -546,7 +582,7 @@ fun CanopyLauncherApp(
             if (pending != null) {
                 val (widgetId, spec) = pending
                 if (result.resultCode == Activity.RESULT_OK) {
-                    insertBoundWidget(widgetId, spec)
+                    completeBoundWidgetOrConfigure(widgetId, spec)
                 } else {
                     runCatching { appWidgetHost?.deleteAppWidgetId(widgetId) }
                 }
@@ -1110,7 +1146,7 @@ fun CanopyLauncherApp(
                                     val component = ComponentName(spec.providerPackage, spec.providerClass)
                                     val bound = manager.bindAppWidgetIdIfAllowed(widgetId, component)
                                     if (bound) {
-                                        insertBoundWidget(widgetId, spec)
+                                        completeBoundWidgetOrConfigure(widgetId, spec)
                                     } else {
                                         pendingWidgetBind = widgetId to spec
                                         val bindIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND).apply {

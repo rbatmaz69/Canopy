@@ -60,4 +60,29 @@ class WidgetFallbackAndContextShortcutsTest {
             ContextMenuPositioner.shortcutsForTile(TileData("med", TileType.MEDIA, "Medien")),
         )
     }
+
+    @Test
+    fun `computeWidgetSizeBundleRanges computes responsive min and max bounds`() {
+        val compact = WidgetFrameEngine.computeWidgetSizeBundleRanges(
+            tileWidthDp = 174f,
+            tileHeightDp = 154f,
+            fixedWidthDp = 158f,
+            fixedHeightDp = 148f,
+        )
+        assertEquals(158, compact.minWidthDp)
+        assertEquals(120, compact.minHeightDp)
+        assertTrue(compact.maxWidthDp >= compact.minWidthDp)
+        assertTrue(compact.maxHeightDp >= compact.minHeightDp)
+
+        val large = WidgetFrameEngine.computeWidgetSizeBundleRanges(
+            tileWidthDp = 360f,
+            tileHeightDp = 280f,
+            fixedWidthDp = 158f,
+            fixedHeightDp = 148f,
+        )
+        assertEquals(158, large.minWidthDp)
+        assertEquals(148, large.minHeightDp)
+        assertEquals(344, large.maxWidthDp)
+        assertEquals(246, large.maxHeightDp)
+    }
 }

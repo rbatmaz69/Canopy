@@ -156,6 +156,7 @@ fun DefaultTileBodyRouter(props: TileContentProps) {
         TileType.BATTERY -> BatteryTile(props)
         TileType.STEPS -> StepsTile(props)
         TileType.QUICK_TOGGLES -> QuickTogglesTile(props)
+        TileType.APP_GROUP -> AppGroupTile(props)
         else -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
             Text(
                 text = "${props.tile.title} (${props.tier})",

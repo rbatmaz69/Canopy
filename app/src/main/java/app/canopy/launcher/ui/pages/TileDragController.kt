@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.canopy.launcher.data.AlarmState
+import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.data.MotionSettings
 import app.canopy.launcher.layout.DropZone
 import app.canopy.launcher.layout.LauncherPage
@@ -179,6 +180,44 @@ object TileDragEngine {
             val targetLeafId = dropPreview.leaf.id
             val zone = dropPreview.zone
             val safeEdgeZone = if (zone == DropZone.CENTER) DropZone.BOTTOM else zone
+
+            if (zone == DropZone.CENTER &&
+                dropPreview.leaf.tile.type == TileType.APP_GROUP &&
+                drag.tile.type == TileType.SINGLE_APP &&
+                !drag.tile.appId.isNullOrBlank()
+            ) {
+                val mergedAppIds = ((dropPreview.leaf.tile.appIds ?: emptyList()) + drag.tile.appId).distinct()
+                if (drag.sourceKind == DragSourceKind.CATALOG_TILE) {
+                    val updated = pages.map { p ->
+                        if (p.id == dropPreview.pageId) {
+                            p.copy(
+                                root = TilingEngine.updateLeafTile(p.root, targetLeafId) { prev ->
+                                    prev.copy(appIds = mergedAppIds)
+                                }
+                            )
+                        } else p
+                    }
+                    return DropOutcome(updated, hapticKind = HapticKind.SNAP)
+                }
+                if (drag.sourcePageId != null && drag.sourceLeafId != null) {
+                    val withMerged = pages.map { p ->
+                        if (p.id == dropPreview.pageId) {
+                            p.copy(
+                                root = TilingEngine.updateLeafTile(p.root, targetLeafId) { prev ->
+                                    prev.copy(appIds = mergedAppIds)
+                                }
+                            )
+                        } else p
+                    }
+                    val srcPage = withMerged.firstOrNull { it.id == drag.sourcePageId } ?: return DropOutcome(withMerged)
+                    val removed = TilingEngine.removeLeaf(srcPage.root, drag.sourceLeafId)
+                    val remainingTree = removed.tree ?: return DropOutcome(withMerged, hapticKind = HapticKind.SNAP)
+                    val updated = withMerged.map { p ->
+                        if (p.id == drag.sourcePageId) p.copy(root = remainingTree) else p
+                    }
+                    return DropOutcome(updated, hapticKind = HapticKind.SNAP)
+                }
+            }
 
             if (drag.sourceKind == DragSourceKind.CATALOG_TILE) {
                 val updated = pages.map { p ->

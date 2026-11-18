@@ -1,9 +1,21 @@
 package app.canopy.launcher.ui.tiles
 
+import app.canopy.launcher.layout.DropZone
+import app.canopy.launcher.layout.LauncherPage
+import app.canopy.launcher.layout.LeafNode
+import app.canopy.launcher.layout.PageKind
+import app.canopy.launcher.layout.RectFBounds
+import app.canopy.launcher.layout.SplitDirection
+import app.canopy.launcher.layout.SplitNode
 import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.layout.TileType
+import app.canopy.launcher.layout.TilingEngine
 import app.canopy.launcher.ui.overlays.AppGroupEditorActions
+import app.canopy.launcher.ui.pages.ActiveTileDrag
+import app.canopy.launcher.ui.pages.DragSourceKind
+import app.canopy.launcher.ui.pages.DropPreviewResult
+import app.canopy.launcher.ui.pages.TileDragEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -73,5 +85,74 @@ class BentoGroupLayoutTest {
         // Cannot remove last remaining app
         val keptLast = AppGroupEditorActions.toggleAppInGroup(removedOne, "app-kamera")
         assertEquals(listOf("app-kamera"), keptLast)
+    }
+
+    @Test
+    fun `moveAppInGroup reorders apps and applyDropMutation merges SINGLE_APP into APP_GROUP center`() {
+        val reordered = AppGroupEditorActions.moveAppInGroup(
+            listOf("app-telefon", "app-kamera", "app-browser"),
+            "app-browser",
+            -1,
+        )
+        assertEquals(listOf("app-telefon", "app-browser", "app-kamera"), reordered)
+
+        val groupTile = TileData(
+            id = "g-fav",
+            type = TileType.APP_GROUP,
+            title = "Favoriten",
+            appIds = listOf("app-telefon", "app-kamera"),
+            accentHue = 215f,
+        )
+        val tinted = AppGroupEditorActions.updateGroupAccentHue(groupTile, 330f)
+        assertEquals(330f, tinted.accentHue)
+
+        val singleTile = TileData(
+            id = "t-single",
+            type = TileType.SINGLE_APP,
+            title = "Netz",
+            appId = "app-browser",
+        )
+        val page = LauncherPage(
+            id = "page-1",
+            title = "Start",
+            kind = PageKind.TILES,
+            root = SplitNode(
+                id = "s-root",
+                direction = SplitDirection.VERTICAL,
+                ratio = 0.5f,
+                first = LeafNode("leaf-group", groupTile),
+                second = LeafNode("leaf-single", singleTile),
+            ),
+        )
+        val groupLeafLayout = TilingEngine.computeLayout(
+            page.root,
+            RectFBounds(0f, 0f, 360f, 400f),
+            8f,
+        ).leaves.first { it.id == "leaf-group" }
+        val outcome = TileDragEngine.applyDropMutation(
+            pages = listOf(page),
+            drag = ActiveTileDrag(
+                sourceKind = DragSourceKind.PAGE_TILE,
+                sourcePageId = "page-1",
+                sourceLeafId = "leaf-single",
+                tile = singleTile,
+                widthDp = 160f,
+                heightDp = 140f,
+                pointerXRootPx = 100f,
+                pointerYRootPx = 100f,
+            ),
+            dropPreview = DropPreviewResult.LeafTarget(
+                pageId = "page-1",
+                leaf = groupLeafLayout,
+                zone = DropZone.CENTER,
+            ),
+            shouldRemove = false,
+        )
+        val remainingLeaves = TilingEngine.collectLeaves(outcome.pages.first().root)
+        assertEquals(1, remainingLeaves.size)
+        assertEquals(
+            listOf("app-telefon", "app-kamera", "app-browser"),
+            remainingLeaves.first().tile.appIds,
+        )
     }
 }

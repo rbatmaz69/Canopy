@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.ui.components.AppSquircleIcon
+import app.canopy.launcher.ui.theme.CanopyThemes
 import app.canopy.launcher.ui.theme.SurfaceEmphasis
 import app.canopy.launcher.ui.theme.ThemeTokens
 import app.canopy.launcher.ui.tiles.AppDefinition
@@ -63,6 +64,8 @@ enum class GroupOverlayMode {
 }
 
 object AppGroupEditorActions {
+    val GROUP_ACCENT_SWATCH_HUES: List<Float> = listOf(215f, 160f, 38f, 271f, 330f, 14f)
+
     fun renameGroup(tile: TileData, draftTitle: String): TileData {
         val clean = draftTitle.trim()
         return if (clean.isEmpty()) tile else tile.copy(title = clean)
@@ -75,6 +78,19 @@ object AppGroupEditorActions {
         }
         return if (exists) currentIds.filter { it != appId } else currentIds + appId
     }
+
+    fun moveAppInGroup(currentIds: List<String>, appId: String, delta: Int): List<String> {
+        val idx = currentIds.indexOf(appId)
+        val nextIdx = idx + delta
+        if (idx !in currentIds.indices || nextIdx !in currentIds.indices) return currentIds
+        val mutable = currentIds.toMutableList()
+        val moved = mutable.removeAt(idx)
+        mutable.add(nextIdx, moved)
+        return mutable
+    }
+
+    fun updateGroupAccentHue(tile: TileData, hue: Float): TileData =
+        tile.copy(accentHue = ((hue % 360f) + 360f) % 360f)
 }
 
 @Composable
@@ -225,6 +241,35 @@ fun AppGroupOverlay(
                 }
             }
 
+            if (isManaging) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Akzent:", color = surface.textSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    AppGroupEditorActions.GROUP_ACCENT_SWATCH_HUES.forEach { swatchHue ->
+                        val activeHue = tile.accentHue == swatchHue
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(CanopyThemes.hslColor(swatchHue, 78f, 54f))
+                                .border(
+                                    width = if (activeHue) 2.dp else 1.dp,
+                                    color = if (activeHue) Color.White else Color.White.copy(alpha = 0.25f),
+                                    shape = CircleShape,
+                                )
+                                .clickable {
+                                    onUpdateGroup { prev -> AppGroupEditorActions.updateGroupAccentHue(prev, swatchHue) }
+                                }
+                        )
+                    }
+                }
+            }
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -261,6 +306,32 @@ fun AppGroupOverlay(
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 AppSquircleIcon(appId = app.id, iconKey = app.iconKey, color = app.color, size = 46.dp)
                                 Text(app.name, color = surface.textPrimary, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                                if (selected && currentIds.size > 1) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            text = "←",
+                                            color = surface.accentColor,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable {
+                                                onUpdateGroup { prev ->
+                                                    prev.copy(appIds = AppGroupEditorActions.moveAppInGroup(prev.appIds ?: emptyList(), app.id, -1))
+                                                }
+                                            },
+                                        )
+                                        Text(
+                                            text = "→",
+                                            color = surface.accentColor,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable {
+                                                onUpdateGroup { prev ->
+                                                    prev.copy(appIds = AppGroupEditorActions.moveAppInGroup(prev.appIds ?: emptyList(), app.id, 1))
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
                             }
                             if (selected) {
                                 Box(

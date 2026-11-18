@@ -1,5 +1,9 @@
 package app.canopy.launcher.ui.pages
 
+import app.canopy.launcher.layout.DropZone
+import app.canopy.launcher.layout.SplitDirection
+import app.canopy.launcher.layout.TileData
+import app.canopy.launcher.layout.TileType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -32,5 +36,32 @@ class TilingEditMathTest {
         assertEquals(-1, TilingEditMath.squishSideDirection(-5f))
         assertEquals(0, TilingEditMath.squishSideDirection(1f))
         assertTrue(TilingEditMath.ghostTierBadgeText(260f, 78f).startsWith("TICKER"))
+    }
+
+    @Test
+    fun `resolveDropZoneLabel and buildDividerStateDescription produce context-aware accessibility labels`() {
+        val groupTile = TileData("g1", TileType.APP_GROUP, "Favoriten")
+        val singleTile = TileData("a1", TileType.SINGLE_APP, "Telefon", appId = "app-telefon")
+        val dragSingle = ActiveTileDrag(
+            sourceKind = DragSourceKind.PAGE_TILE,
+            tile = singleTile,
+            widthDp = 120f,
+            heightDp = 120f,
+            pointerXRootPx = 0f,
+            pointerYRootPx = 0f,
+        )
+
+        assertEquals("In Gruppe", TilingEditMath.resolveDropZoneLabel(dragSingle, groupTile, DropZone.CENTER))
+        assertEquals("Tauschen", TilingEditMath.resolveDropZoneLabel(dragSingle, singleTile, DropZone.CENTER))
+        assertEquals("Teilen", TilingEditMath.resolveDropZoneLabel(dragSingle, groupTile, DropZone.RIGHT))
+
+        assertEquals(
+            "Horizontale Teilung, 50 Prozent",
+            TilingEditMath.buildDividerStateDescription(SplitDirection.HORIZONTAL, 0.5f),
+        )
+        assertEquals(
+            "Vertikale Teilung, 33 Prozent",
+            TilingEditMath.buildDividerStateDescription(SplitDirection.VERTICAL, 0.33f),
+        )
     }
 }

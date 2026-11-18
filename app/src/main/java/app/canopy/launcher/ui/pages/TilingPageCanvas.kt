@@ -43,6 +43,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -126,6 +127,24 @@ object TilingEditMath {
     fun ghostTierBadgeText(widthDp: Float, heightDp: Float): String {
         val tier = TilingEngine.computeSizeTier(widthDp, heightDp)
         return "$tier · ${widthDp.roundToInt()}×${heightDp.roundToInt()}"
+    }
+
+    fun resolveDropZoneLabel(
+        drag: ActiveTileDrag?,
+        targetTile: TileData,
+        zone: DropZone,
+    ): String = when {
+        zone == DropZone.CENTER &&
+            targetTile.type == TileType.APP_GROUP &&
+            drag?.tile?.type == TileType.SINGLE_APP -> "In Gruppe"
+        zone == DropZone.CENTER -> "Tauschen"
+        else -> "Teilen"
+    }
+
+    fun buildDividerStateDescription(direction: SplitDirection, ratio: Float): String {
+        val pct = (ratio.coerceIn(0f, 1f) * 100f).roundToInt()
+        val dirLabel = if (direction == SplitDirection.HORIZONTAL) "Horizontale Teilung" else "Vertikale Teilung"
+        return "$dirLabel, $pct Prozent"
     }
 
     /** Returns -1 for first side squish, +1 for second side squish, 0 for none. */
@@ -233,6 +252,14 @@ fun TilingPageCanvas(
                 modifier = Modifier
                     .offset(x = leaf.rect.x.dp, y = leaf.rect.y.dp)
                     .size(width = leaf.rect.width.dp, height = leaf.rect.height.dp)
+                    .semantics {
+                        contentDescription = leaf.tile.title
+                        stateDescription = if (effectiveEdit) {
+                            "Bearbeitungsmodus, ${TilingEditMath.ghostTierBadgeText(leaf.rect.width, leaf.rect.height)}"
+                        } else {
+                            "Kachel ${TilingEngine.computeSizeTier(leaf.rect.width, leaf.rect.height)}"
+                        }
+                    }
                     .graphicsLayer {
                         scaleX = scaleAnim
                         scaleY = scaleAnim
@@ -335,7 +362,11 @@ fun TilingPageCanvas(
 
                 val dropLeafTarget = activeDrop as? DropPreviewResult.LeafTarget
                 if (isDropTarget && dropLeafTarget != null) {
-                    DropZonePreviewOverlay(zone = dropLeafTarget.zone, radiusDp = theme.tileRadiusDp)
+                    DropZonePreviewOverlay(
+                        zone = dropLeafTarget.zone,
+                        radiusDp = theme.tileRadiusDp,
+                        label = TilingEditMath.resolveDropZoneLabel(activeDrag, leaf.tile, dropLeafTarget.zone),
+                    )
                 }
 
                 if (leaf.id in affectedResizeIds) {
@@ -380,7 +411,10 @@ fun TilingPageCanvas(
                     modifier = Modifier
                         .offset(x = hitX.dp, y = hitY.dp)
                         .size(width = hitW.dp, height = hitH.dp)
-                        .semantics { contentDescription = "Trennlinie ${divider.id}" }
+                        .semantics {
+                            contentDescription = "Trennlinie ${divider.id}"
+                            stateDescription = TilingEditMath.buildDividerStateDescription(divider.direction, divider.ratio)
+                        }
                         .pointerInput(divider.id, effectiveEdit, animatedGapDp) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -517,6 +551,10 @@ fun TilingPageCanvas(
                     modifier = Modifier
                         .offset(x = (ix.x - 13f).dp, y = (ix.y - 13f).dp)
                         .size(26.dp)
+                        .semantics {
+                            contentDescription = "2D-Kreuzung ${ix.id}"
+                            stateDescription = "${ix.horizontalSplits.size} horizontal, ${ix.verticalSplits.size} vertikal"
+                        }
                         .graphicsLayer {
                             scaleX = ixScale
                             scaleY = ixScale
@@ -668,7 +706,11 @@ private fun SnapGuideLinesOverlay(guideDiv: ComputedDivider, gapDp: Float) {
 }
 
 @Composable
-fun DropZonePreviewOverlay(zone: DropZone, radiusDp: Float) {
+fun DropZonePreviewOverlay(
+    zone: DropZone,
+    radiusDp: Float,
+    label: String = if (zone == DropZone.CENTER) "Tauschen" else "Teilen",
+) {
     val corner = max(10f, radiusDp - 4f).dp
     Box(
         modifier = Modifier.fillMaxSize().padding(4.dp)
@@ -688,7 +730,7 @@ fun DropZonePreviewOverlay(zone: DropZone, radiusDp: Float) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = if (zone == DropZone.CENTER) "Tauschen" else "Teilen",
+                text = label,
                 color = Color.White,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,

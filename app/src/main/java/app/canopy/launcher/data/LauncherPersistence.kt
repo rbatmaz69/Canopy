@@ -22,6 +22,7 @@ data class PersistedLauncherState(
     val useSystemWallpaper: Boolean = false,
     val appUsageCounts: Map<String, Int> = emptyMap(),
     val customCalendarEvents: List<CalendarEvent> = emptyList(),
+    val weatherCityId: String = "berlin",
 )
 
 interface LauncherStateStore {

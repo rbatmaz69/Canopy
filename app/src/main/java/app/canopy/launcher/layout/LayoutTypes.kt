@@ -166,6 +166,7 @@ data class TileData(
     val newAppIds: List<String>? = null,
     val togglePreset: TogglePreset? = null,
     val androidAppWidgetId: Int? = null,
+    val customPhotoUri: String? = null,
 )
 
 @Serializable

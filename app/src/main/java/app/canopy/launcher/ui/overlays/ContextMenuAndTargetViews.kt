@@ -5,6 +5,7 @@ import android.provider.AlarmClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,7 +84,9 @@ import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.system.InstalledAppsMapper
+import app.canopy.launcher.system.LocalWeatherSnapshot
 import app.canopy.launcher.system.NativeShortcutEntry
+import app.canopy.launcher.system.OpenMeteoWeatherParser
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import app.canopy.launcher.ui.navigation.SharedElementExpandContainer
 import app.canopy.launcher.ui.theme.CanopyThemes
@@ -335,6 +338,8 @@ fun FakeAppOverlay(
     alarmState: AlarmState = AlarmState(),
     onUpdateAlarmState: (AlarmState) -> Unit = {},
     onUpdateTile: (pageId: String, leafId: String, updater: (TileData) -> TileData) -> Unit = { _, _, _ -> },
+    weatherCityId: String = "berlin",
+    onSelectWeatherCity: (String) -> Unit = {},
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -555,6 +560,18 @@ fun FakeAppOverlay(
                     target.tile?.type == TileType.MEDIA || app?.id == "app-musik" || app?.id == "app-podcast" -> {
                         MediaTargetView(
                             mediaState = mediaState,
+                            fg = fg,
+                            muted = muted,
+                            cardBg = cardBg,
+                            accentColor = accentColor,
+                            accentBg = accentBg,
+                        )
+                    }
+
+                    target.tile?.type == TileType.WEATHER || target.tile?.type == TileType.TEMP_CURVE || app?.id == "app-wetter" -> {
+                        WeatherTargetView(
+                            weatherCityId = weatherCityId,
+                            onSelectWeatherCity = onSelectWeatherCity,
                             fg = fg,
                             muted = muted,
                             cardBg = cardBg,
@@ -975,6 +992,98 @@ private fun SettingsTargetView(
         Row(modifier = Modifier.fillMaxWidth().clickable { settings.onChangeTonalIcons(!settings.tonalIcons) }, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Tonale Icons", color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
             Text(if (settings.tonalIcons) "An" else "Aus", color = accentColor, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun WeatherTargetView(
+    weatherCityId: String,
+    onSelectWeatherCity: (String) -> Unit,
+    fg: Color,
+    muted: Color,
+    cardBg: Color,
+    accentColor: Color,
+    accentBg: Color,
+) {
+    val weather = LocalWeatherSnapshot.current
+
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("STANDORT · OPEN-METEO LIVE", color = muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OpenMeteoWeatherParser.CITY_PRESETS.forEach { preset ->
+                val active = preset.id == weatherCityId
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (active) accentColor else Color(0x247D7D91))
+                        .clickable { onSelectWeatherCity(preset.id) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = preset.name,
+                        color = if (active) Color.White else fg,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(weather.cityName, color = accentColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "${weather.currentTempC}°C",
+                    color = fg,
+                    style = TextStyle(fontSize = 36.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("H ${weather.highTempC}° · T ${weather.lowTempC}°", color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Regenrisiko ${weather.rainChancePercent}%", color = muted, fontSize = 12.sp)
+            }
+        }
+        Text(weather.conditionLabel, color = muted, fontSize = 13.sp)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("STUNDENVERLAUF (${weather.peakHourLabel})", color = muted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            weather.hourlyPoints.forEach { pt ->
+                Column(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(accentBg)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(pt.hour, color = muted, fontSize = 11.sp)
+                    Text("${pt.tempC.toInt()}°", color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }

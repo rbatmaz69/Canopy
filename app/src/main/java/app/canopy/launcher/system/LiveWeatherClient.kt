@@ -21,7 +21,17 @@ import java.net.URL
 import kotlin.math.roundToInt
 
 @Immutable
+data class WeatherCityPreset(
+    val id: String,
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+)
+
+@Immutable
 data class WeatherSnapshot(
+    val cityId: String = "berlin",
+    val cityName: String = "Berlin",
     val currentTempC: Int = 7,
     val highTempC: Int = 11,
     val lowTempC: Int = 4,
@@ -42,6 +52,21 @@ val LocalWeatherSnapshot = staticCompositionLocalOf { WeatherSnapshot() }
 object OpenMeteoWeatherParser {
     private val json = Json { ignoreUnknownKeys = true }
 
+    val CITY_PRESETS: List<WeatherCityPreset> = listOf(
+        WeatherCityPreset("berlin", "Berlin", 52.52, 13.41),
+        WeatherCityPreset("muenchen", "München", 48.14, 11.58),
+        WeatherCityPreset("hamburg", "Hamburg", 53.55, 9.99),
+        WeatherCityPreset("koeln", "Köln", 50.94, 6.96),
+        WeatherCityPreset("frankfurt", "Frankfurt", 50.11, 8.68),
+        WeatherCityPreset("wien", "Wien", 48.21, 16.37),
+        WeatherCityPreset("zuerich", "Zürich", 47.37, 8.54),
+    )
+
+    fun resolveCityPreset(id: String): WeatherCityPreset {
+        val clean = id.trim().lowercase()
+        return CITY_PRESETS.firstOrNull { it.id == clean } ?: CITY_PRESETS.first()
+    }
+
     fun mapWmoWeatherCode(code: Int): Pair<String, String> = when (code) {
         0 -> "Klarer Himmel, sonnig" to "Sonnig"
         in 1..3 -> "Leicht bis stark bewölkt" to "Bewölkt"
@@ -59,7 +84,11 @@ object OpenMeteoWeatherParser {
         else -> "Cloud"
     }
 
-    fun parseForecastJson(rawJson: String): WeatherSnapshot? = runCatching {
+    fun parseForecastJson(
+        rawJson: String,
+        cityName: String = "Berlin",
+        cityId: String = "berlin",
+    ): WeatherSnapshot? = runCatching {
         val root = json.parseToJsonElement(rawJson).jsonObject
         val current = root["current"]?.jsonObject ?: return null
         val currentTemp = current["temperature_2m"]?.jsonPrimitive?.doubleOrNull?.roundToInt() ?: return null
@@ -103,6 +132,8 @@ object OpenMeteoWeatherParser {
         val peakHourLabel = "${peakIdx.toString().padStart(2, '0')}h Peak"
 
         WeatherSnapshot(
+            cityId = cityId,
+            cityName = cityName,
             currentTempC = currentTemp,
             highTempC = highTemp,
             lowTempC = lowTemp,
@@ -125,7 +156,26 @@ class LiveWeatherController {
     private val _weatherFlow = MutableStateFlow(WeatherSnapshot())
     val weatherFlow: StateFlow<WeatherSnapshot> = _weatherFlow.asStateFlow()
 
-    suspend fun refresh(latitude: Double = 52.52, longitude: Double = 13.41) {
+    suspend fun refreshForCity(cityId: String) {
+        val preset = OpenMeteoWeatherParser.resolveCityPreset(cityId)
+        _weatherFlow.value = _weatherFlow.value.copy(
+            cityId = preset.id,
+            cityName = preset.name,
+        )
+        refresh(
+            latitude = preset.latitude,
+            longitude = preset.longitude,
+            cityName = preset.name,
+            cityId = preset.id,
+        )
+    }
+
+    suspend fun refresh(
+        latitude: Double = 52.52,
+        longitude: Double = 13.41,
+        cityName: String = "Berlin",
+        cityId: String = "berlin",
+    ) {
         val parsed = withContext(Dispatchers.IO) {
             runCatching {
                 val url = URL(
@@ -142,7 +192,7 @@ class LiveWeatherController {
                 try {
                     if (conn.responseCode in 200..299) {
                         val raw = conn.inputStream.bufferedReader().use { it.readText() }
-                        OpenMeteoWeatherParser.parseForecastJson(raw)
+                        OpenMeteoWeatherParser.parseForecastJson(raw, cityName = cityName, cityId = cityId)
                     } else null
                 } finally {
                     conn.disconnect()

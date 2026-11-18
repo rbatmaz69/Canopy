@@ -155,9 +155,6 @@ fun CanopyLauncherApp(
     val hardwareTelemetry by hardwareController.telemetryFlow.collectAsState()
 
     val weatherController = remember { LiveWeatherController() }
-    LaunchedEffect(weatherController) {
-        weatherController.refresh()
-    }
     val weatherSnapshot by weatherController.weatherFlow.collectAsState()
 
     val systemDataProvider = remember(context) { SystemDataProvider(context) }
@@ -183,6 +180,11 @@ fun CanopyLauncherApp(
     var useSystemWallpaper by remember { mutableStateOf(initialState.useSystemWallpaper) }
     var appUsageCounts by remember { mutableStateOf(initialState.appUsageCounts) }
     var customCalendarEvents by remember { mutableStateOf(initialState.customCalendarEvents) }
+    var weatherCityId by remember { mutableStateOf(initialState.weatherCityId) }
+
+    LaunchedEffect(weatherController, weatherCityId) {
+        weatherController.refreshForCity(weatherCityId)
+    }
     val boostedAppsCatalog = remember(liveAppsCatalog, appUsageCounts) {
         AllAppsCatalogSorter.applyUsageBoost(liveAppsCatalog, appUsageCounts)
     }
@@ -214,6 +216,7 @@ fun CanopyLauncherApp(
         useSystemWallpaper = useSystemWallpaper,
         appUsageCounts = appUsageCounts,
         customCalendarEvents = customCalendarEvents,
+        weatherCityId = weatherCityId,
     )
     LaunchedEffect(currentSnapshot) {
         store.save(currentSnapshot)
@@ -1148,6 +1151,8 @@ fun CanopyLauncherApp(
                                 if (p.id == pageId) p.copy(root = TilingEngine.updateLeafTile(p.root, leafId, updater)) else p
                             }
                         },
+                        weatherCityId = weatherCityId,
+                        onSelectWeatherCity = { weatherCityId = it },
                         launcherSettings = LauncherSettingsBridge(
                             themeId = themeId,
                             colorMode = colorMode,
@@ -1225,6 +1230,7 @@ fun CanopyLauncherApp(
                                 useSystemWallpaper = restored.useSystemWallpaper
                                 appUsageCounts = restored.appUsageCounts
                                 customCalendarEvents = restored.customCalendarEvents
+                                weatherCityId = restored.weatherCityId
                                 backupStatusMessage = "Layout erfolgreich importiert (${restored.pages.size} Seiten)."
                             }
                             .onFailure { err ->
@@ -1246,6 +1252,7 @@ fun CanopyLauncherApp(
                         useSystemWallpaper = false
                         appUsageCounts = emptyMap()
                         customCalendarEvents = emptyList()
+                        weatherCityId = "berlin"
                         editHistory = EditHistoryState()
                         NotificationBadgeStore.restoreDemoNotifications()
                         showDevMenu = false

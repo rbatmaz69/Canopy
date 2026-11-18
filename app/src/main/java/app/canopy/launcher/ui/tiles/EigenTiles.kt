@@ -1,11 +1,17 @@
 package app.canopy.launcher.ui.tiles
 
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -73,9 +79,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -126,6 +135,9 @@ object EigenTileActions {
             ?: "Notiz #${lines.size + 1}"
         return listOf(idea) + lines
     }
+
+    fun applyCustomPhotoUri(tile: TileData, uriString: String?): TileData =
+        tile.copy(customPhotoUri = uriString?.trim()?.takeIf { it.isNotEmpty() })
 }
 
 @Composable
@@ -381,7 +393,7 @@ fun ClockTile(props: TileContentProps) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(hw.shortDateLabel, color = props.surface.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text("Berlin", color = props.surface.accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(LocalWeatherSnapshot.current.cityName, color = props.surface.accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
 
             Text(
@@ -951,8 +963,35 @@ fun NoteTile(props: TileContentProps) {
 
 @Composable
 fun PhotosTile(props: TileContentProps) {
+    val context = LocalContext.current
     var sceneIdx by remember { mutableIntStateOf(0) }
     val scene = SystemTileDefaults.PHOTO_SCENES[sceneIdx]
+    val customPhotoUri = props.tile.customPhotoUri
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            props.onUpdateTile(props.leafId) { prev ->
+                EigenTileActions.applyCustomPhotoUri(prev, uri.toString())
+            }
+        }
+    }
+
+    val customBitmap = remember(customPhotoUri) {
+        if (customPhotoUri.isNullOrBlank()) null
+        else runCatching {
+            context.contentResolver.openInputStream(Uri.parse(customPhotoUri))?.use { stream ->
+                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
 
     if (props.tier == TileSizeTier.XS) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -970,42 +1009,56 @@ fun PhotosTile(props: TileContentProps) {
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = kbScale
-                    scaleY = kbScale
-                }
-        ) {
-            val w = size.width
-            val h = size.height
-            drawRect(
-                brush = Brush.linearGradient(
-                    colors = listOf(Color(scene.c1Hex), Color(scene.c2Hex), Color(scene.c3Hex)),
-                    start = Offset.Zero,
-                    end = Offset(w, h),
-                )
+        if (customBitmap != null) {
+            Image(
+                bitmap = customBitmap,
+                contentDescription = "Eigenes Foto",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = kbScale
+                        scaleY = kbScale
+                    },
             )
-            drawCircle(Color(scene.sunHex).copy(alpha = 0.85f), radius = min(w, h) * 0.14f, center = Offset(w * 0.72f, h * 0.32f))
-            val hill1 = Path().apply {
-                moveTo(0f, h * 0.70f)
-                quadraticTo(w * 0.25f, h * 0.52f, w * 0.52f, h * 0.65f)
-                quadraticTo(w * 0.78f, h * 0.75f, w, h * 0.58f)
-                lineTo(w, h)
-                lineTo(0f, h)
-                close()
+        } else {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = kbScale
+                        scaleY = kbScale
+                    }
+            ) {
+                val w = size.width
+                val h = size.height
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(scene.c1Hex), Color(scene.c2Hex), Color(scene.c3Hex)),
+                        start = Offset.Zero,
+                        end = Offset(w, h),
+                    )
+                )
+                drawCircle(Color(scene.sunHex).copy(alpha = 0.85f), radius = min(w, h) * 0.14f, center = Offset(w * 0.72f, h * 0.32f))
+                val hill1 = Path().apply {
+                    moveTo(0f, h * 0.70f)
+                    quadraticTo(w * 0.25f, h * 0.52f, w * 0.52f, h * 0.65f)
+                    quadraticTo(w * 0.78f, h * 0.75f, w, h * 0.58f)
+                    lineTo(w, h)
+                    lineTo(0f, h)
+                    close()
+                }
+                drawPath(hill1, color = Color(0xB81E1B4B))
+                val hill2 = Path().apply {
+                    moveTo(0f, h * 0.82f)
+                    quadraticTo(w * 0.30f, h * 0.70f, w * 0.63f, h * 0.80f)
+                    quadraticTo(w * 0.82f, h * 0.86f, w, h * 0.75f)
+                    lineTo(w, h)
+                    lineTo(0f, h)
+                    close()
+                }
+                drawPath(hill2, color = Color(0xE00F172A))
             }
-            drawPath(hill1, color = Color(0xB81E1B4B))
-            val hill2 = Path().apply {
-                moveTo(0f, h * 0.82f)
-                quadraticTo(w * 0.30f, h * 0.70f, w * 0.63f, h * 0.80f)
-                quadraticTo(w * 0.82f, h * 0.86f, w, h * 0.75f)
-                lineTo(w, h)
-                lineTo(0f, h)
-                close()
-            }
-            drawPath(hill2, color = Color(0xE00F172A))
         }
 
         Box(
@@ -1020,30 +1073,57 @@ fun PhotosTile(props: TileContentProps) {
                 .padding(12.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .clip(CircleShape)
-                    .background(Color(0x850F172A))
-                    .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
-                    .clickable(enabled = !props.isEditMode) {
-                        sceneIdx = EigenTileActions.nextPhotoSceneIndex(sceneIdx)
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.align(Alignment.TopEnd),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    text = "${sceneIdx + 1}/${SystemTileDefaults.PHOTO_SCENES.size}",
-                    color = Color.White,
-                    style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
-                )
-                Icon(Icons.Rounded.Refresh, contentDescription = "Nächstes Foto", tint = Color.White, modifier = Modifier.size(11.dp))
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color(0x850F172A))
+                        .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
+                        .clickable(enabled = !props.isEditMode) {
+                            runCatching { photoPickerLauncher.launch(arrayOf("image/*")) }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(Icons.Rounded.Image, contentDescription = "Eigenes Foto wählen", tint = Color.White, modifier = Modifier.size(11.dp))
+                    Text("Foto", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color(0x850F172A))
+                        .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
+                        .clickable(enabled = !props.isEditMode) {
+                            if (customPhotoUri != null) {
+                                props.onUpdateTile(props.leafId) { prev ->
+                                    EigenTileActions.applyCustomPhotoUri(prev, null)
+                                }
+                            } else {
+                                sceneIdx = EigenTileActions.nextPhotoSceneIndex(sceneIdx)
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = if (customBitmap != null) "Galerie" else "${sceneIdx + 1}/${SystemTileDefaults.PHOTO_SCENES.size}",
+                        color = Color.White,
+                        style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
+                    )
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Nächstes Foto", tint = Color.White, modifier = Modifier.size(11.dp))
+                }
             }
 
             Column(modifier = Modifier.align(Alignment.BottomStart)) {
-                Text(scene.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(if (customBitmap != null) "Eigenes Galerie-Foto" else scene.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 if (props.tier != TileSizeTier.S) {
-                    Text(scene.meta, color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
+                    Text(if (customBitmap != null) "Tippen auf Szene zum Wechseln" else scene.meta, color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
                 }
             }
         }

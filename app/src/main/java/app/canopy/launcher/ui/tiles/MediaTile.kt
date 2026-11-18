@@ -35,6 +35,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.platform.LocalContext
+import android.os.SystemClock
+import app.canopy.launcher.system.SystemIntents
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,7 +60,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.canopy.launcher.data.SystemTileDefaults
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.ui.theme.CanopyThemes
 import kotlin.math.floor
@@ -75,16 +80,35 @@ object MediaTileHelpers {
 
 @Composable
 fun MediaTile(props: TileContentProps) {
+    // Extrapolate progress locally once per second while playing, so only this tile
+    // recomposes — not the whole launcher.
+    val snap = props.mediaState.snapshot
+    var nowElapsed by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(snap) {
+        nowElapsed = SystemClock.elapsedRealtime()
+        while (snap?.isPlaying == true) {
+            delay(1000L)
+            nowElapsed = SystemClock.elapsedRealtime()
+        }
+    }
+    if (snap != null) {
+        val live = snap.progressAt(nowElapsed)
+        MediaTileContent(props.copy(mediaState = props.mediaState.copy(progress = live)))
+    } else {
+        MediaTileContent(props)
+    }
+}
+
+@Composable
+private fun MediaTileContent(props: TileContentProps) {
+    val context = LocalContext.current
     val liveTrack = props.mediaState.overrideTrack
     if (liveTrack == null) {
-        val musicAppId = props.allAppsCatalog.firstOrNull {
-            it.iconKey == "Music2" || it.iconKey == "Headphones"
-        }?.id ?: "app-musik"
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .clickable(enabled = !props.isEditMode) {
-                    props.onOpenApp(musicAppId, null)
+                    SystemIntents.openMediaApp(context, props.mediaState.sessionPackage)
                 },
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -250,9 +274,9 @@ private fun CoverArtwork(track: MediaTrack, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LargeHeroMediaContent(props: TileContentProps, track: MediaTrack) {
+private fun animatedEqBarHeights(): List<Float> {
     val eqTransition = rememberInfiniteTransition(label = "eq-bars")
-    val barHeights = List(4) { idx ->
+    return List(4) { idx ->
         val animated by eqTransition.animateFloat(
             initialValue = 3f,
             targetValue = 11f,
@@ -262,8 +286,14 @@ private fun LargeHeroMediaContent(props: TileContentProps, track: MediaTrack) {
             ),
             label = "eq-bar-$idx",
         )
-        if (props.mediaState.isPlaying) animated else 4f
+        animated
     }
+}
+
+@Composable
+private fun LargeHeroMediaContent(props: TileContentProps, track: MediaTrack) {
+    // The endless equalizer animation only exists while something is actually playing.
+    val barHeights = if (props.mediaState.isPlaying) animatedEqBarHeights() else List(4) { 4f }
 
     Box(modifier = Modifier.fillMaxSize()) {
         CoverArtwork(track = track, modifier = Modifier.fillMaxSize())

@@ -66,6 +66,8 @@ import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.CanopySprings
 import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.motion.SpringRole
+import app.canopy.launcher.system.TileTapRouter
+import app.canopy.launcher.system.TileTapTarget
 import app.canopy.launcher.ui.theme.ThemeTokens
 import app.canopy.launcher.ui.tiles.AppDefinition
 import app.canopy.launcher.ui.tiles.CalendarEvent
@@ -175,7 +177,7 @@ fun TilingPageCanvas(
     onOpenApp: (String, Rect?) -> Unit,
     onOpenGroup: (TileData, String, Rect?) -> Unit,
     onOpenSearch: () -> Unit,
-    onOpenFakeTileApp: (TileData, Rect?) -> Unit,
+    onOpenTileTarget: (TileData, Rect?) -> Unit,
     onOpenContextMenu: (ComputedLeaf, String, Rect) -> Unit,
     onCloseContextMenu: () -> Unit,
     onStartTileDrag: (ActiveTileDrag) -> Unit,
@@ -293,11 +295,14 @@ fun TilingPageCanvas(
                                 val ch = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
                                 if (ch == null || !ch.pressed) {
                                     lpJob?.cancel()
-                                    if (!longPressFired && !dragStarted && !effectiveEdit &&
-                                        leaf.tile.type !in setOf(TileType.APP_GROUP, TileType.SEARCH_BAR, TileType.ALL_APPS_BOX, TileType.QUICK_TOGGLES)
+                                    // An inner control (app icon, play button, checkbox, …) already
+                                    // consumed this tap in the Main pass — never fire a second action.
+                                    val handledByChild = ch?.isConsumed == true
+                                    if (!longPressFired && !dragStarted && !effectiveEdit && !handledByChild &&
+                                        TileTapRouter.resolve(leaf.tile) != TileTapTarget.NONE
                                     ) {
                                         CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
-                                        onOpenFakeTileApp(leaf.tile, leafBoundsInRoot)
+                                        onOpenTileTarget(leaf.tile, leafBoundsInRoot)
                                     }
                                     break
                                 }
@@ -349,7 +354,7 @@ fun TilingPageCanvas(
                     onOpenApp = onOpenApp,
                     onOpenGroup = onOpenGroup,
                     onOpenSearch = onOpenSearch,
-                    onOpenFakeTileApp = onOpenFakeTileApp,
+                    onOpenTileTarget = onOpenTileTarget,
                     onUpdateTile = { lid, updater -> onUpdateTile(page.id, lid, updater) },
                     calendarEvents = calendarEvents,
                     mediaState = mediaState,

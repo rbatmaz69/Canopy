@@ -52,7 +52,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.canopy.launcher.data.ColorMode
-import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.layout.WidgetKind
 import app.canopy.launcher.motion.CanopyHaptics
@@ -60,6 +59,10 @@ import app.canopy.launcher.motion.HapticKind
 import app.canopy.launcher.system.LocalHardwareTelemetry
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import java.util.Locale
+import android.os.Build
+import android.util.SizeF
+import android.view.ViewGroup
+import androidx.compose.foundation.layout.BoxWithConstraints
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -75,6 +78,24 @@ data class WidgetSizeRangeDp(
     val maxWidthDp: Int,
     val maxHeightDp: Int,
 )
+
+/** Tells an AppWidgetHostView its real size (Android 12+ exact sizes, legacy min/max otherwise). */
+object WidgetSizing {
+    fun applySize(view: AppWidgetHostView, widthDp: Float, heightDp: Float) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                view.updateAppWidgetSize(Bundle(), listOf(SizeF(widthDp, heightDp)))
+            } else {
+                @Suppress("DEPRECATION")
+                view.updateAppWidgetSize(
+                    Bundle.EMPTY,
+                    widthDp.roundToInt(), heightDp.roundToInt(),
+                    widthDp.roundToInt(), heightDp.roundToInt(),
+                )
+            }
+        }
+    }
+}
 
 object WidgetFrameEngine {
     const val PASSEPARTOUT_MARGIN_DP = 10f
@@ -120,8 +141,10 @@ object WidgetFrameEngine {
 
 @Composable
 fun SingleAppTile(props: TileContentProps) {
-    val appsById = props.allAppsCatalog.associateBy { it.id }.ifEmpty { MockCatalogData.APPS_BY_ID }
-    val app = appsById[props.tile.appId.orEmpty()] ?: AppDefinition(
+    val installed = remember(props.allAppsCatalog, props.tile.appId) {
+        props.allAppsCatalog.firstOrNull { it.id == props.tile.appId }
+    }
+    val app = installed ?: AppDefinition(
         id = props.tile.appId ?: "app-fallback",
         name = props.tile.title.ifBlank { "App" },
         iconKey = "Compass",
@@ -129,8 +152,10 @@ fun SingleAppTile(props: TileContentProps) {
         hue = props.tile.accentHue ?: 217f,
         category = AppCategory.WERKZEUGE,
         usageScore = 50,
-        subtitle = "Bereit",
+        subtitle = if (props.allAppsCatalog.isEmpty()) "" else "Nicht installiert",
     )
+    // Package names are not useful to show; only show a subtitle that reads like text.
+    val subtitle = app.subtitle.takeUnless { it.contains('.') && !it.contains(' ') }.orEmpty()
     var boundsRect: Rect? = null
 
     val handleTap = {
@@ -162,7 +187,9 @@ fun SingleAppTile(props: TileContentProps) {
             AppSquircleIcon(appId = app.id, iconKey = app.iconKey, color = app.color, size = 36.dp, badge = app.badge)
             Column(Modifier.weight(1f)) {
                 Text(app.name, color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(app.subtitle, color = props.surface.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle.isNotEmpty()) {
+                    Text(subtitle, color = props.surface.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
 
@@ -182,9 +209,9 @@ fun SingleAppTile(props: TileContentProps) {
             )
             Column {
                 Text(app.name, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (props.tier != TileSizeTier.S) {
+                if (props.tier != TileSizeTier.S && subtitle.isNotEmpty()) {
                     Spacer(Modifier.height(2.dp))
-                    Text(app.subtitle, color = props.surface.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(subtitle, color = props.surface.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -202,17 +229,6 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
         SingleAppTile(props)
         return
     }
-
-    val hw = LocalHardwareTelemetry.current
-    val podcastDurationSec = 42 * 60
-    val podcastElapsedSec = (props.mediaState.progress * podcastDurationSec).roundToInt()
-    val podMm = (podcastElapsedSec / 60).toString().padStart(2, '0')
-    val podSs = (podcastElapsedSec % 60).toString().padStart(2, '0')
-    val activeBarCount = max(1, min(12, (props.mediaState.progress * 12f).roundToInt()))
-
-    val fitnessPct = hw.steps.goalPercent
-    val fitnessKcal = hw.steps.kcal
-    val fitnessKm = hw.steps.distanceKmLabel
 
     val fitScale = WidgetFrameEngine.computeBreathingScale(props.widthDp, props.heightDp, fixedW, fixedH)
     val passepartoutBg = if (props.theme.isGlass) Color(0x24FFFFFF) else props.surface.accentBg
@@ -249,10 +265,10 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
                     modifier = Modifier
                         .size(7.dp)
                         .clip(CircleShape)
-                        .background(if (isPodcast) Color(0xFFA855F7) else Color(0xFF10B981))
+                        .background(props.surface.accentColor)
                 )
                 Text(
-                    text = if (isPodcast) "Podcast · 14m" else "Ziel $fitnessPct %",
+                    text = props.tile.title.ifBlank { "Widget" },
                     color = props.surface.textSecondary,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold,
@@ -260,7 +276,7 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
+            if (props.tile.appId != null) Text(
                 text = "Öffnen ↗",
                 color = props.surface.textPrimary,
                 fontSize = 10.sp,
@@ -271,10 +287,7 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
                     .onGloballyPositioned { openBtnRect = it.boundsInRoot() }
                     .clickable(enabled = !props.isEditMode) {
                         CanopyHaptics.trigger(HapticKind.PRESS, props.motionSettings.hapticsEnabled)
-                        props.onOpenApp(
-                            props.tile.appId ?: if (isPodcast) "app-podcast" else "app-fitness",
-                            openBtnRect,
-                        )
+                        props.tile.appId?.let { props.onOpenApp(it, openBtnRect) }
                     }
                     .padding(horizontal = 7.dp, vertical = 2.dp),
             )
@@ -290,31 +303,24 @@ fun ThirdPartyWidgetTile(props: TileContentProps) {
             }
 
             if (hostView != null) {
-                LaunchedEffect(hostView, props.widthDp, props.heightDp, fixedW, fixedH) {
-                    val ranges = WidgetFrameEngine.computeWidgetSizeBundleRanges(
-                        tileWidthDp = props.widthDp,
-                        tileHeightDp = props.heightDp,
-                        fixedWidthDp = fixedW,
-                        fixedHeightDp = fixedH,
-                    )
-                    runCatching {
-                        @Suppress("DEPRECATION")
-                        hostView.updateAppWidgetSize(
-                            Bundle.EMPTY,
-                            ranges.minWidthDp,
-                            ranges.minHeightDp,
-                            ranges.maxWidthDp,
-                            ranges.maxHeightDp,
-                        )
+                // The widget gets the real tile size (no scaling), and the provider is told the
+                // exact size so it can pick the right responsive layout.
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val wDp = maxWidth.value
+                    val hDp = maxHeight.value
+                    LaunchedEffect(hostView, wDp.roundToInt(), hDp.roundToInt()) {
+                        WidgetSizing.applySize(hostView, wDp, hDp)
                     }
+                    AndroidView(
+                        factory = {
+                            (hostView.parent as? ViewGroup)?.removeView(hostView)
+                            hostView
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp)),
+                    )
                 }
-                AndroidView(
-                    factory = { hostView },
-                    modifier = Modifier
-                        .size(width = fixedW.dp, height = fixedH.dp)
-                        .graphicsLayer { scaleX = fitScale; scaleY = fitScale }
-                        .clip(RoundedCornerShape(16.dp)),
-                )
             } else {
                 Column(
                     modifier = Modifier

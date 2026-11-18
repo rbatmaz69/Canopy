@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -96,37 +99,90 @@ data class SearchResults(
 }
 
 object UniversalSearchEngine {
+    /** Lowercase without accents, so "uber" finds "Über" and "e" finds "é". */
+    fun normalize(text: String): String =
+        java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .lowercase(Locale.ROOT)
+            .trim()
+
+    private val wordSplit = Regex("[\\s._\\-]+")
+
+    /** Relevance of [name] for the normalized query [q]; 0 means no match. */
+    fun scoreName(name: String, q: String): Int {
+        if (q.isEmpty()) return 0
+        val n = normalize(name)
+        val words = n.split(wordSplit).filter { it.isNotEmpty() }
+        val initials = words.joinToString("") { it.take(1) }
+        return when {
+            n == q -> 120
+            n.startsWith(q) -> 100
+            words.any { it.startsWith(q) } -> 85
+            q.length >= 2 && initials.startsWith(q) -> 75
+            n.contains(q) -> 60
+            q.length >= 3 && isSubsequence(q, n) -> 30
+            else -> 0
+        }
+    }
+
+    private fun isSubsequence(q: String, text: String): Boolean {
+        var i = 0
+        for (ch in text) {
+            if (i < q.length && ch == q[i]) i++
+        }
+        return i == q.length
+    }
+
+    fun rankApps(apps: List<AppDefinition>, query: String, limit: Int = 12): List<AppDefinition> {
+        val q = normalize(query)
+        if (q.isEmpty()) return apps.sortedByDescending { it.usageScore }.take(8)
+        return apps.mapNotNull { app ->
+            val byName = scoreName(app.name, q)
+            val byCategory = if (normalize(app.category.label).startsWith(q)) 15 else 0
+            val score = maxOf(byName, byCategory)
+            if (score == 0) null else app to (score * 1000 + app.usageScore.coerceIn(0, 999))
+        }
+            .sortedWith(compareByDescending<Pair<AppDefinition, Int>> { it.second }.thenBy { it.first.name.lowercase(Locale.ROOT) })
+            .take(limit)
+            .map { it.first }
+    }
+
     fun filterAll(
         query: String,
         apps: List<AppDefinition> = MockCatalogData.APPS_CATALOG,
         contacts: List<ContactItem> = MockCatalogData.CONTACTS_MOCK,
         settings: List<SettingItem> = MockCatalogData.SETTINGS_MOCK,
     ): SearchResults {
-        val q = query.trim().lowercase()
-        val matchedApps = if (q.isEmpty()) {
-            apps.take(8)
-        } else {
-            apps.filter { a ->
-                a.name.lowercase().contains(q) ||
-                    a.category.label.lowercase().contains(q) ||
-                    a.subtitle.lowercase().contains(q)
-            }.take(12)
-        }
-        val matchedContacts = if (q.isEmpty()) {
-            contacts.take(2)
-        } else {
-            contacts.filter { c ->
-                c.name.lowercase().contains(q) || c.role.lowercase().contains(q)
+        val q = normalize(query)
+        val matchedApps = rankApps(apps, query)
+        if (q.isEmpty()) return SearchResults(matchedApps, emptyList(), emptyList())
+        val matchedContacts = contacts
+            .mapNotNull { c -> scoreName(c.name, q).takeIf { it > 0 }?.let { c to it } }
+            .sortedByDescending { it.second }
+            .take(6)
+            .map { it.first }
+        val matchedSettings = settings
+            .mapNotNull { s ->
+                val score = maxOf(scoreName(s.name, q), if (normalize(s.detail).contains(q)) 40 else 0)
+                if (score > 0) s to score else null
             }
-        }
-        val matchedSettings = if (q.isEmpty()) {
-            settings.take(2)
-        } else {
-            settings.filter { s ->
-                s.name.lowercase().contains(q) || s.detail.lowercase().contains(q)
-            }
-        }
+            .sortedByDescending { it.second }
+            .take(4)
+            .map { it.first }
         return SearchResults(matchedApps, matchedContacts, matchedSettings)
+    }
+
+    sealed interface EnterAction {
+        data class OpenApp(val appId: String) : EnterAction
+        data class WebSearch(val query: String) : EnterAction
+        data object Nothing : EnterAction
+    }
+
+    /** Enter opens the best local app match; only without one does it search the web. */
+    fun resolveEnterAction(query: String, results: SearchResults): EnterAction {
+        if (query.isBlank()) return EnterAction.Nothing
+        results.apps.firstOrNull()?.let { return EnterAction.OpenApp(it.id) }
+        return EnterAction.WebSearch(query.trim())
     }
 
     fun shouldShowBrowserCard(rawQuery: String): Boolean = rawQuery.trim().isNotEmpty()
@@ -299,6 +355,19 @@ fun UniversalSearchOverlay(
     val results = remember(query, allAppsCatalog, contactsCatalog) {
         UniversalSearchEngine.filterAll(query, apps = allAppsCatalog, contacts = contactsCatalog)
     }
+    val onEnter: () -> Unit = {
+        when (val action = UniversalSearchEngine.resolveEnterAction(query, results)) {
+            is UniversalSearchEngine.EnterAction.OpenApp -> {
+                CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
+                onOpenApp(action.appId, null)
+            }
+            is UniversalSearchEngine.EnterAction.WebSearch -> {
+                CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
+                onSearchWeb(action.query, null)
+            }
+            UniversalSearchEngine.EnterAction.Nothing -> Unit
+        }
+    }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         runCatching { focusRequester.requestFocus() }
@@ -310,83 +379,19 @@ fun UniversalSearchOverlay(
         modifier = Modifier
             .fillMaxSize()
             .background(theme.sheetBg)
-            .padding(start = 14.dp, end = 14.dp, top = 44.dp, bottom = 20.dp),
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
     ) {
-        // Search Input Bar (IME_ACTION_SEARCH + hardware Enter support)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(inputBg)
-                .border(1.dp, theme.sheetBorder, RoundedCornerShape(20.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(Icons.Rounded.Search, contentDescription = null, tint = theme.textSecondary, modifier = Modifier.size(18.dp))
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                if (query.isEmpty()) {
-                    Text(
-                        text = "Apps, Kontakte oder Web-Suche (Enter)…",
-                        color = theme.textMuted,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = {
-                        query = it
-                        copiedCalc = false
-                    },
-                    singleLine = true,
-                    textStyle = TextStyle(color = theme.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                    cursorBrush = SolidColor(theme.pillActive),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
-                            onSearchWeb(UniversalSearchEngine.resolveWebSearchQuery(query), null)
-                        }
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester)
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyUp && keyEvent.key == Key.Enter) {
-                                CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
-                                onSearchWeb(UniversalSearchEngine.resolveWebSearchQuery(query), null)
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .clickable {
-                        CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
-                        if (query.isNotEmpty()) query = "" else onClose()
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.Close, contentDescription = "Suche schließen", tint = theme.textSecondary, modifier = Modifier.size(18.dp))
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
 
         // Scrollable Results Grid
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .verticalScroll(rememberScrollState(), reverseScrolling = true),
+            verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Bottom),
         ) {
             if (mathResult != null) {
                 val calcSurf = theme.getTileSurface(160f, SurfaceEmphasis.NORMAL)
@@ -605,7 +610,7 @@ fun UniversalSearchOverlay(
 
             if (results.isEmpty) {
                 Text(
-                    text = "Keine lokalen Treffer für „$query“ – oben tippen oder Enter für Web-Suche.",
+                    text = "Keine Treffer für „$query“ – Enter sucht im Web.",
                     color = theme.textMuted,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
@@ -614,17 +619,67 @@ fun UniversalSearchOverlay(
             }
         }
 
-        Box(
+        Spacer(Modifier.height(10.dp))
+        // Search field at the bottom: in thumb reach and right above the keyboard.
+        // Search Input Bar (IME_ACTION_SEARCH + hardware Enter support)
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp)
-                .defaultMinSize(minHeight = 44.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .border(1.dp, theme.sheetBorder, RoundedCornerShape(14.dp))
-                .clickable { onClose() },
-            contentAlignment = Alignment.Center,
+                .clip(RoundedCornerShape(20.dp))
+                .background(inputBg)
+                .border(1.dp, theme.sheetBorder, RoundedCornerShape(20.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Schließen", color = theme.textPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Icon(Icons.Rounded.Search, contentDescription = null, tint = theme.textSecondary, modifier = Modifier.size(18.dp))
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (query.isEmpty()) {
+                    Text(
+                        text = "Apps, Kontakte, Einstellungen …",
+                        color = theme.textMuted,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        copiedCalc = false
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(color = theme.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                    cursorBrush = SolidColor(theme.pillActive),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { onEnter() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .onPreviewKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyUp && keyEvent.key == Key.Enter) {
+                                onEnter()
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
+                        if (query.isNotEmpty()) query = "" else onClose()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Close, contentDescription = if (query.isNotEmpty()) "Eingabe löschen" else "Suche schließen", tint = theme.textSecondary, modifier = Modifier.size(20.dp))
+            }
         }
+
     }
 }

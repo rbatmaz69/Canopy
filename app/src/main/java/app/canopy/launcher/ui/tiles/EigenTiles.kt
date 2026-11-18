@@ -80,11 +80,17 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import app.canopy.launcher.system.SystemIntents
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -111,29 +117,18 @@ object EigenTileActions {
     fun toggleReminder(items: List<ReminderItem>, id: String): List<ReminderItem> =
         items.map { if (it.id == id) it.copy(done = !it.done) else it }
 
-    fun addQuickReminder(items: List<ReminderItem>): List<ReminderItem> {
-        val candidate = SystemTileDefaults.QUICK_REMINDER_IDEAS
-            .firstOrNull { idea -> items.none { it.text == idea } }
-            ?: "Notiz #${items.size + 1}"
-        val next = ReminderItem(
-            id = "r-${items.size + 1}-${candidate.hashCode().toUInt()}",
-            text = candidate,
-            done = false,
-        )
-        return listOf(next) + items
+    fun addReminder(items: List<ReminderItem>, text: String, nowMillis: Long = System.currentTimeMillis()): List<ReminderItem> {
+        val clean = text.trim()
+        if (clean.isEmpty()) return items
+        return listOf(ReminderItem(id = "r-$nowMillis", text = clean, done = false)) + items
     }
 
     fun checkAllReminders(items: List<ReminderItem>): List<ReminderItem> =
         items.map { it.copy(done = true) }
 
-    fun nextPhotoSceneIndex(currentIdx: Int, count: Int = SystemTileDefaults.PHOTO_SCENES.size): Int =
-        if (count <= 0) 0 else (currentIdx + 1) % count
-
-    fun addQuickNoteLine(lines: List<String>): List<String> {
-        val idea = SystemTileDefaults.QUICK_REMINDER_IDEAS
-            .firstOrNull { candidate -> lines.none { it == candidate } }
-            ?: "Notiz #${lines.size + 1}"
-        return listOf(idea) + lines
+    fun addNoteLine(lines: List<String>, text: String): List<String> {
+        val clean = text.trim()
+        return if (clean.isEmpty()) lines else listOf(clean) + lines
     }
 
     fun applyCustomPhotoUri(tile: TileData, uriString: String?): TileData =
@@ -158,7 +153,11 @@ fun GreetingTile(props: TileContentProps) {
                 Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
                 Text(hw.greetingSingleLine, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("${hw.shortDateLabel} · ${weather.currentTempC}° ${weather.shortCondition}", color = props.surface.textSecondary, fontSize = 13.sp)
+            Text(
+                text = if (weather.isLiveFromNetwork) "${hw.shortDateLabel} · ${weather.currentTempC}° ${weather.shortCondition}" else hw.shortDateLabel,
+                color = props.surface.textSecondary,
+                fontSize = 13.sp,
+            )
         }
         TileSizeTier.S, TileSizeTier.LIST -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -167,7 +166,11 @@ fun GreetingTile(props: TileContentProps) {
             Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
             Column {
                 Text(hw.greetingSingleLine, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp)
-                Text("${hw.shortDateLabel} · ${weather.currentTempC}°", color = props.surface.textSecondary, fontSize = 12.sp)
+                Text(
+                    text = if (weather.isLiveFromNetwork) "${hw.shortDateLabel} · ${weather.currentTempC}°" else hw.shortDateLabel,
+                    color = props.surface.textSecondary,
+                    fontSize = 12.sp,
+                )
             }
         }
         else -> Column(
@@ -186,20 +189,22 @@ fun GreetingTile(props: TileContentProps) {
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.4.sp,
                 )
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(props.surface.accentBg)
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(Icons.Rounded.Cloud, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(14.dp))
-                    Text(
-                        text = "${weather.currentTempC}°",
-                        color = props.surface.textPrimary,
-                        style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
-                    )
+                if (weather.isLiveFromNetwork) {
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(props.surface.accentBg)
+                            .padding(horizontal = 9.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Icon(Icons.Rounded.Cloud, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(14.dp))
+                        Text(
+                            text = "${weather.currentTempC}°",
+                            color = props.surface.textPrimary,
+                            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
+                        )
+                    }
                 }
             }
             Column {
@@ -215,7 +220,16 @@ fun GreetingTile(props: TileContentProps) {
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "${weather.conditionLabel}. ${props.calendarEvents.size} Termine heute.",
+                    text = buildString {
+                        if (weather.isLiveFromNetwork) append("${weather.conditionLabel}. ")
+                        append(
+                            when (props.calendarEvents.size) {
+                                0 -> "Heute keine Termine."
+                                1 -> "1 Termin heute."
+                                else -> "${props.calendarEvents.size} Termine heute."
+                            }
+                        )
+                    },
                     color = props.surface.textSecondary,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -230,6 +244,10 @@ fun GreetingTile(props: TileContentProps) {
 @Composable
 fun TempCurveTile(props: TileContentProps) {
     val weather = LocalWeatherSnapshot.current
+    if (!weather.isLiveFromNetwork) {
+        WeatherUnavailableContent(props, Icons.Rounded.Thermostat)
+        return
+    }
     when (props.tier) {
         TileSizeTier.XS -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -251,7 +269,7 @@ fun TempCurveTile(props: TileContentProps) {
             Text("${weather.lowTempC}° – ${weather.highTempC}°", color = props.surface.textPrimary, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         else -> {
-            val series = weather.hourlyPoints.ifEmpty { SystemTileDefaults.TEMP_DAY_SERIES }
+            val series = weather.hourlyPoints.ifEmpty { listOf(app.canopy.launcher.data.TempPoint("", weather.currentTempC.toFloat())) }
             val minCurveTemp = series.minOf { it.tempC }
             val maxCurveSpan = max(4f, series.maxOf { it.tempC } - minCurveTemp)
             Column(
@@ -306,7 +324,7 @@ fun TempCurveTile(props: TileContentProps) {
                         color = props.surface.accentColor,
                         style = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
-                    val activePt = pts[1]
+                    val activePt = pts.getOrElse(1) { pts.first() }
                     drawCircle(props.surface.accentColor.copy(alpha = 0.25f), radius = 14f, center = activePt)
                     drawCircle(props.surface.accentColor, radius = 8f, center = activePt)
                 }
@@ -353,11 +371,49 @@ fun TempCurveTile(props: TileContentProps) {
     }
 }
 
+/** Shown by weather tiles until a first real forecast has been loaded. */
+@Composable
+private fun WeatherUnavailableContent(props: TileContentProps, icon: ImageVector) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, contentDescription = null, tint = props.surface.textSecondary, modifier = Modifier.size(22.dp))
+        if (props.tier != TileSizeTier.XS) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Keine Wetterdaten",
+                color = props.surface.textPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (props.tier != TileSizeTier.TICKER) {
+                Text(
+                    text = "Tippen, um den Ort zu wählen",
+                    color = props.surface.textSecondary,
+                    fontSize = 10.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun ClockTile(props: TileContentProps) {
     val hw = LocalHardwareTelemetry.current
-    val isAlarmOff = !props.alarmState.enabled || props.tile.subtitle == "Wecker aus"
-    val alarmLabel = if (isAlarmOff) "Wecker aus" else "Wecker ${props.alarmState.timeLabel}"
+    val context = LocalContext.current
+    val isAlarmOff = hw.nextAlarmLabel == null
+    val alarmLabel = when {
+        hw.nextAlarmLabel == null -> "Kein Wecker"
+        hw.nextAlarmIsToday -> "Wecker ${hw.nextAlarmLabel}"
+        else -> "Wecker ${hw.nextAlarmLabel} (morgen+)"
+    }
     val fluidClockSize = max(28f, min(if (props.theme.isBold) 56f else 50f, min(props.widthDp * 0.24f, props.heightDp * 0.28f)))
 
     when (props.tier) {
@@ -393,7 +449,10 @@ fun ClockTile(props: TileContentProps) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(hw.shortDateLabel, color = props.surface.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text(LocalWeatherSnapshot.current.cityName, color = props.surface.accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                val clockWeather = LocalWeatherSnapshot.current
+                if (clockWeather.isLiveFromNetwork) {
+                    Text(clockWeather.cityName, color = props.surface.accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
 
             Text(
@@ -412,10 +471,7 @@ fun ClockTile(props: TileContentProps) {
                     .clip(CircleShape)
                     .background(if (isAlarmOff) Color(0x287D7D91) else props.surface.accentBg)
                     .clickable(enabled = !props.isEditMode) {
-                        props.onToggleAlarm()
-                        props.onUpdateTile(props.leafId) { prev ->
-                            prev.copy(subtitle = if (isAlarmOff) "Wecker ${props.alarmState.timeLabel}" else "Wecker aus")
-                        }
+                        SystemIntents.openAlarms(context)
                     }
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -423,7 +479,7 @@ fun ClockTile(props: TileContentProps) {
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Alarm,
-                    contentDescription = "Wecker umschalten",
+                    contentDescription = "Wecker öffnen",
                     tint = if (isAlarmOff) props.surface.textSecondary else props.surface.accentColor,
                     modifier = Modifier.size(13.dp),
                 )
@@ -440,6 +496,10 @@ fun ClockTile(props: TileContentProps) {
 @Composable
 fun WeatherTile(props: TileContentProps) {
     val weather = LocalWeatherSnapshot.current
+    if (!weather.isLiveFromNetwork) {
+        WeatherUnavailableContent(props, Icons.Rounded.CloudQueue)
+        return
+    }
     val fluidTempSize = max(28f, min(if (props.theme.isBold) 46f else 42f, min(props.widthDp * 0.25f, props.heightDp * 0.25f)))
     when (props.tier) {
         TileSizeTier.XS -> Column(
@@ -758,9 +818,7 @@ fun RemindersTile(props: TileContentProps) {
                             .clip(CircleShape)
                             .background(props.surface.accentBg)
                             .clickable(enabled = !props.isEditMode) {
-                                props.onUpdateTile(props.leafId) { prev ->
-                                    prev.copy(reminders = EigenTileActions.addQuickReminder(prev.reminders ?: items))
-                                }
+                                props.onOpenTileTarget(props.tile, null)
                             },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -837,7 +895,11 @@ fun BatteryStepsTile(props: TileContentProps) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Akku ${hw.batteryPercent} %", color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("${hw.steps.formattedSteps} Schritte", color = props.surface.textSecondary, fontSize = 13.sp)
+            Text(
+                text = if (hw.stepsAvailable) "${hw.steps.formattedSteps} Schritte" else if (hw.isCharging) "Lädt" else "",
+                color = props.surface.textSecondary,
+                fontSize = 13.sp,
+            )
         }
         else -> Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Text("Status", color = props.surface.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -847,7 +909,7 @@ fun BatteryStepsTile(props: TileContentProps) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ProgressRingItem(hw.batteryPercent / 100f, Color(0xFF22C55E), props.surface.accentBg, props.surface.textPrimary, props.surface.textSecondary, "Akku", "${hw.batteryPercent}%")
-                if (props.tier != TileSizeTier.LIST) {
+                if (props.tier != TileSizeTier.LIST && hw.stepsAvailable) {
                     ProgressRingItem(hw.steps.progressRatio, props.surface.accentColor, props.surface.accentBg, props.surface.textPrimary, props.surface.textSecondary, "Schritte", hw.steps.compactLabel)
                 }
             }
@@ -856,8 +918,10 @@ fun BatteryStepsTile(props: TileContentProps) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(if (hw.isCharging) "Lädt (${hw.estimatedHoursLeft} Std.)" else "ca. ${hw.estimatedHoursLeft} Std.", color = props.surface.textSecondary, fontSize = 10.5.sp)
-                    Text("${hw.steps.distanceKmLabel} km heute", color = props.surface.textSecondary, fontSize = 10.5.sp)
+                    Text(if (hw.isCharging) "Lädt" else "Akku", color = props.surface.textSecondary, fontSize = 10.5.sp)
+                    if (hw.stepsAvailable) {
+                        Text("${hw.steps.distanceKmLabel} km heute", color = props.surface.textSecondary, fontSize = 10.5.sp)
+                    }
                 }
             }
         }
@@ -902,7 +966,7 @@ fun BatteryTile(props: TileContentProps) {
                 Icon(Icons.Rounded.BatteryChargingFull, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(18.dp))
             }
             Text("${hw.batteryPercent}%", color = props.surface.textPrimary, style = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
-            Text(if (hw.isCharging) "Lädt gerade" else "Noch ca. ${hw.estimatedHoursLeft} Std.", color = props.surface.textSecondary, fontSize = 12.sp)
+            Text(if (hw.isCharging) "Lädt gerade" else "Tippen für Akkunutzung", color = props.surface.textSecondary, fontSize = 12.sp)
         }
     }
 }
@@ -910,6 +974,19 @@ fun BatteryTile(props: TileContentProps) {
 @Composable
 fun StepsTile(props: TileContentProps) {
     val hw = LocalHardwareTelemetry.current
+    if (!hw.stepsAvailable) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null, tint = props.surface.textSecondary, modifier = Modifier.size(20.dp))
+            if (props.tier != TileSizeTier.XS) {
+                Spacer(Modifier.height(4.dp))
+                Text("Schritte nicht verfügbar", color = props.surface.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2)
+                if (props.tier != TileSizeTier.TICKER && props.tier != TileSizeTier.S) {
+                    Text("Erlaube „Körperliche Aktivität“ in der Einrichtung", color = props.surface.textSecondary, fontSize = 10.5.sp, textAlign = TextAlign.Center, maxLines = 2)
+                }
+            }
+        }
+        return
+    }
     if (props.tier == TileSizeTier.XS) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
@@ -946,9 +1023,7 @@ fun NoteTile(props: TileContentProps) {
                         .clip(CircleShape)
                         .background(props.surface.accentBg)
                         .clickable(enabled = !props.isEditMode) {
-                            props.onUpdateTile(props.leafId) { prev ->
-                                prev.copy(noteLines = EigenTileActions.addQuickNoteLine(prev.noteLines ?: lines))
-                            }
+                            props.onOpenTileTarget(props.tile, null)
                         },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -978,8 +1053,6 @@ fun NoteTile(props: TileContentProps) {
 @Composable
 fun PhotosTile(props: TileContentProps) {
     val context = LocalContext.current
-    var sceneIdx by remember { mutableIntStateOf(0) }
-    val scene = SystemTileDefaults.PHOTO_SCENES[sceneIdx]
     val customPhotoUri = props.tile.customPhotoUri
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -998,150 +1071,84 @@ fun PhotosTile(props: TileContentProps) {
         }
     }
 
-    val customBitmap = remember(customPhotoUri) {
-        if (customPhotoUri.isNullOrBlank()) null
-        else runCatching {
-            context.contentResolver.openInputStream(Uri.parse(customPhotoUri))?.use { stream ->
-                BitmapFactory.decodeStream(stream)?.asImageBitmap()
-            }
-        }.getOrNull()
+    // Decode off the main thread and downsample to roughly the tile size.
+    val targetPx = with(LocalDensity.current) { max(props.widthDp, props.heightDp).dp.roundToPx() }
+    val customBitmap by produceState<ImageBitmap?>(initialValue = null, customPhotoUri, targetPx) {
+        value = if (customPhotoUri.isNullOrBlank()) null else withContext(Dispatchers.IO) {
+            PhotoDecoder.decodeSampled(context, Uri.parse(customPhotoUri), targetPx)
+        }
     }
 
-    if (props.tier == TileSizeTier.XS) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.Image, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(21.dp))
+    if (customBitmap == null) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(enabled = !props.isEditMode) {
+                    runCatching { photoPickerLauncher.launch(arrayOf("image/*")) }
+                },
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.Rounded.Image, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(24.dp))
+            if (props.tier != TileSizeTier.XS) {
+                Spacer(Modifier.height(4.dp))
+                Text("Foto wählen", color = props.surface.textPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                if (props.tier != TileSizeTier.TICKER) {
+                    Text("Ein Bild aus deiner Galerie", color = props.surface.textSecondary, fontSize = 10.5.sp)
+                }
+            }
         }
         return
     }
 
-    val kenBurns = rememberInfiniteTransition(label = "ken-burns")
-    val kbScale by kenBurns.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(tween(14000), RepeatMode.Reverse),
-        label = "kb-scale",
-    )
-
     Box(modifier = Modifier.fillMaxSize()) {
-        if (customBitmap != null) {
-            Image(
-                bitmap = customBitmap,
-                contentDescription = "Eigenes Foto",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = kbScale
-                        scaleY = kbScale
-                    },
-            )
-        } else {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = kbScale
-                        scaleY = kbScale
-                    }
-            ) {
-                val w = size.width
-                val h = size.height
-                drawRect(
-                    brush = Brush.linearGradient(
-                        colors = listOf(Color(scene.c1Hex), Color(scene.c2Hex), Color(scene.c3Hex)),
-                        start = Offset.Zero,
-                        end = Offset(w, h),
-                    )
-                )
-                drawCircle(Color(scene.sunHex).copy(alpha = 0.85f), radius = min(w, h) * 0.14f, center = Offset(w * 0.72f, h * 0.32f))
-                val hill1 = Path().apply {
-                    moveTo(0f, h * 0.70f)
-                    quadraticTo(w * 0.25f, h * 0.52f, w * 0.52f, h * 0.65f)
-                    quadraticTo(w * 0.78f, h * 0.75f, w, h * 0.58f)
-                    lineTo(w, h)
-                    lineTo(0f, h)
-                    close()
-                }
-                drawPath(hill1, color = Color(0xB81E1B4B))
-                val hill2 = Path().apply {
-                    moveTo(0f, h * 0.82f)
-                    quadraticTo(w * 0.30f, h * 0.70f, w * 0.63f, h * 0.80f)
-                    quadraticTo(w * 0.82f, h * 0.86f, w, h * 0.75f)
-                    lineTo(w, h)
-                    lineTo(0f, h)
-                    close()
-                }
-                drawPath(hill2, color = Color(0xE00F172A))
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color(0xAD000000)),
-                        startY = 120f,
-                    )
-                )
-                .padding(12.dp)
-        ) {
+        Image(
+            bitmap = customBitmap!!,
+            contentDescription = props.tile.title.ifBlank { "Foto" },
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (props.tier != TileSizeTier.XS) {
             Row(
-                modifier = Modifier.align(Alignment.TopEnd),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x850F172A))
+                    .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
+                    .clickable(enabled = !props.isEditMode) {
+                        runCatching { photoPickerLauncher.launch(arrayOf("image/*")) }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color(0x850F172A))
-                        .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
-                        .clickable(enabled = !props.isEditMode) {
-                            runCatching { photoPickerLauncher.launch(arrayOf("image/*")) }
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Rounded.Image, contentDescription = "Eigenes Foto wählen", tint = Color.White, modifier = Modifier.size(11.dp))
-                    Text("Foto", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color(0x850F172A))
-                        .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
-                        .clickable(enabled = !props.isEditMode) {
-                            if (customPhotoUri != null) {
-                                props.onUpdateTile(props.leafId) { prev ->
-                                    EigenTileActions.applyCustomPhotoUri(prev, null)
-                                }
-                            } else {
-                                sceneIdx = EigenTileActions.nextPhotoSceneIndex(sceneIdx)
-                            }
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = if (customBitmap != null) "Galerie" else "${sceneIdx + 1}/${SystemTileDefaults.PHOTO_SCENES.size}",
-                        color = Color.White,
-                        style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
-                    )
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Nächstes Foto", tint = Color.White, modifier = Modifier.size(11.dp))
-                }
-            }
-
-            Column(modifier = Modifier.align(Alignment.BottomStart)) {
-                Text(if (customBitmap != null) "Eigenes Galerie-Foto" else scene.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                if (props.tier != TileSizeTier.S) {
-                    Text(if (customBitmap != null) "Tippen auf Szene zum Wechseln" else scene.meta, color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
-                }
+                Icon(Icons.Rounded.Image, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                Text("Ändern", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
+}
+
+/** Decodes a content:// image with inSampleSize so large camera photos don't blow up memory. */
+object PhotoDecoder {
+    fun computeSampleSize(srcWidth: Int, srcHeight: Int, targetPx: Int): Int {
+        if (srcWidth <= 0 || srcHeight <= 0 || targetPx <= 0) return 1
+        var sample = 1
+        while (min(srcWidth, srcHeight) / (sample * 2) >= targetPx) sample *= 2
+        return sample
+    }
+
+    fun decodeSampled(context: android.content.Context, uri: Uri, targetPx: Int): ImageBitmap? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = computeSampleSize(bounds.outWidth, bounds.outHeight, targetPx)
+        }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, opts)?.asImageBitmap()
+        }
+    }.getOrNull()
 }
 
 private data class QuickActionItem(
@@ -1158,75 +1165,70 @@ private data class QuickActionItem(
 
 @Composable
 fun QuickTogglesTile(props: TileContentProps) {
-    var eqIndex by remember { mutableIntStateOf(0) }
-    var sleepTimerOn by remember { mutableStateOf(false) }
-    val eqModes = remember { listOf("Warm", "Bass", "Klar") }
+    val context = LocalContext.current
+    val hw = LocalHardwareTelemetry.current
     val preset = props.tile.togglePreset ?: TogglePreset.SYSTEM
 
     val items: List<QuickActionItem> = when (preset) {
         TogglePreset.TODAY -> listOf(
-            QuickActionItem("new-event", "Termin", "+ Termin", "10:00", "Neu", false, null, Icons.Rounded.Event) {
-                props.onOpenApp("app-kalender", null)
+            QuickActionItem("new-event", "Termin", "+ Termin", "Neu", "Neu", false, null, Icons.Rounded.Event) {
+                SystemIntents.insertCalendarEvent(context)
             },
-            QuickActionItem("new-note", "Notiz", "+ Notiz", "Neu", "Neu", false, null, Icons.AutoMirrored.Rounded.NoteAdd) {
-                props.onOpenApp("app-notizen", null)
+            QuickActionItem("timer", "Timer", "Timer", "Uhr-App", "Uhr-App", false, null, Icons.Rounded.Timer) {
+                SystemIntents.openTimer(context)
             },
-            QuickActionItem("alarm", "Wecker", "Wecker", props.alarmState.timeLabel, "Aus", props.alarmState.enabled, null, Icons.Rounded.Alarm) {
-                props.onToggleAlarm()
+            QuickActionItem("alarm", "Wecker", "Wecker", hw.nextAlarmLabel ?: "", "Keiner", hw.nextAlarmLabel != null, null, Icons.Rounded.Alarm) {
+                SystemIntents.openAlarms(context)
             },
-            QuickActionItem("today-focus", "Fokus", "Fokus", "25m an", "25m", props.systemState.dnd, null, Icons.Rounded.DarkMode) {
-                props.systemState.onToggle(SystemToggleKey.DND)
+            QuickActionItem("today-focus", "Nicht stören", "Ruhe", "An", "Aus", props.systemState.dnd, null, Icons.Rounded.DarkMode) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.DND)
             },
         )
         TogglePreset.MEDIA -> listOf(
-            QuickActionItem("headphones", "Kopfhörer", "Audio", "Bluetooth", "Panel", props.systemState.bluetooth, null, Icons.Rounded.Headphones) {
+            QuickActionItem("headphones", "Bluetooth", "Audio", "An", "Aus", props.systemState.bluetooth, null, Icons.Rounded.Headphones) {
                 props.systemState.onOpenSystemPanel(SystemToggleKey.BLUETOOTH)
             },
-            QuickActionItem("eq", "Klang", eqModes[eqIndex], eqModes[eqIndex], eqModes[eqIndex], true, null, Icons.Rounded.Tune) {
-                eqIndex = (eqIndex + 1) % eqModes.size
+            QuickActionItem("volume", "Lautstärke", "Ton", "Panel", "Panel", false, null, Icons.Rounded.Tune) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.VOLUME)
             },
-            QuickActionItem("sleep-timer", "Timer", if (sleepTimerOn) "15m an" else "Timer", "15 Min.", "Aus", sleepTimerOn, Color(0xFFF59E0B), Icons.Rounded.Timer) {
-                sleepTimerOn = !sleepTimerOn
+            QuickActionItem("sleep-timer", "Timer", "Timer", "Uhr-App", "Uhr-App", false, null, Icons.Rounded.Timer) {
+                SystemIntents.openTimer(context)
             },
-            QuickActionItem("podcast-open", "Medien", "Medien", "App", "Öffnen", false, null, Icons.Rounded.Radio) {
-                val mediaAppId = props.allAppsCatalog.firstOrNull { it.iconKey == "Music2" || it.iconKey == "Headphones" }?.id ?: "app-musik"
-                props.onOpenApp(mediaAppId, null)
+            QuickActionItem("media-open", "Medien", "Medien", "App", "Öffnen", props.mediaState.isPlaying, null, Icons.Rounded.Radio) {
+                SystemIntents.openMediaApp(context, props.mediaState.sessionPackage)
             },
         )
         TogglePreset.TOOLS -> listOf(
-            QuickActionItem("quick-search", "Suche", "Suche", "Alle Apps", "Alle Apps", true, null, Icons.Rounded.Search) {
+            QuickActionItem("quick-search", "Suche", "Suche", "Alle Apps", "Alle Apps", false, null, Icons.Rounded.Search) {
                 props.onOpenSearch()
             },
             QuickActionItem("quick-calc", "Rechner", "Rechner", "App", "App", false, null, Icons.Rounded.Calculate) {
-                val calcId = props.allAppsCatalog.firstOrNull { it.iconKey == "Calculator" }?.id ?: "app-rechner"
-                props.onOpenApp(calcId, null)
+                SystemIntents.openCalculator(context)
             },
             QuickActionItem("quick-cam", "Kamera", "Kamera", "App", "App", false, null, Icons.Rounded.CameraAlt) {
-                val camId = props.allAppsCatalog.firstOrNull { it.iconKey == "Camera" }?.id ?: "app-kamera"
-                props.onOpenApp(camId, null)
+                SystemIntents.openCamera(context)
             },
-            QuickActionItem("quick-settings", "System", "System", "Android", "Android", false, null, Icons.Rounded.Tune) {
-                val settingsId = props.allAppsCatalog.firstOrNull { it.iconKey == "Settings" }?.id ?: "app-einstellungen"
-                props.onOpenApp(settingsId, null)
+            QuickActionItem("quick-settings", "Einstellungen", "System", "Android", "Android", false, null, Icons.Rounded.Tune) {
+                SystemIntents.openSystemSettings(context)
             },
         )
         TogglePreset.SYSTEM -> listOf(
-            QuickActionItem("wifi", "WLAN", "WLAN", "Panel", "Panel", props.systemState.wifi, null, if (props.systemState.wifi) Icons.Rounded.Wifi else Icons.Rounded.WifiOff) {
+            QuickActionItem("wifi", "WLAN", "WLAN", "An", "Aus", props.systemState.wifi, null, if (props.systemState.wifi) Icons.Rounded.Wifi else Icons.Rounded.WifiOff) {
                 props.systemState.onOpenSystemPanel(SystemToggleKey.WIFI)
             },
-            QuickActionItem("bluetooth", "Bluetooth", "BT", "Panel", "Panel", props.systemState.bluetooth, null, Icons.Rounded.Bluetooth) {
+            QuickActionItem("bluetooth", "Bluetooth", "BT", "An", "Aus", props.systemState.bluetooth, null, Icons.Rounded.Bluetooth) {
                 props.systemState.onOpenSystemPanel(SystemToggleKey.BLUETOOTH)
             },
-            QuickActionItem("flashlight", "Licht", "Licht", "An", "Aus", props.systemState.flashlight, Color(0xFFF59E0B), Icons.Rounded.FlashlightOn) {
+            QuickActionItem("flashlight", "Taschenlampe", "Licht", "An", "Aus", props.systemState.flashlight, Color(0xFFF59E0B), Icons.Rounded.FlashlightOn) {
                 props.systemState.onToggle(SystemToggleKey.FLASHLIGHT)
             },
-            QuickActionItem("dnd", "Fokus", "Fokus", "Panel", "Panel", props.systemState.dnd, null, Icons.Rounded.DarkMode) {
+            QuickActionItem("dnd", "Nicht stören", "Ruhe", "An", "Aus", props.systemState.dnd, null, Icons.Rounded.DarkMode) {
                 props.systemState.onOpenSystemPanel(SystemToggleKey.DND)
             },
-            QuickActionItem("hotspot", "Hotspot", "Hotspot", "Panel", "Panel", props.systemState.hotspot, null, Icons.Rounded.Radio) {
-                props.systemState.onOpenSystemPanel(SystemToggleKey.HOTSPOT)
+            QuickActionItem("volume", "Lautstärke", "Ton", "Panel", "Panel", false, null, Icons.Rounded.Tune) {
+                props.systemState.onOpenSystemPanel(SystemToggleKey.VOLUME)
             },
-            QuickActionItem("autoRotate", "Drehen", "Drehen", "Display", "Display", props.systemState.autoRotate, null, Icons.Rounded.ScreenRotation) {
+            QuickActionItem("autoRotate", "Drehen", "Drehen", "An", "Aus", props.systemState.autoRotate, null, Icons.Rounded.ScreenRotation) {
                 props.systemState.onOpenSystemPanel(SystemToggleKey.AUTO_ROTATE)
             },
         )
@@ -1329,7 +1331,6 @@ fun QuickTogglesTile(props: TileContentProps) {
     }
 
     val visibleCount = if (props.tier == TileSizeTier.L) items.size else 4
-    val showBrightness = (props.tier == TileSizeTier.M || props.tier == TileSizeTier.L) && preset == TogglePreset.SYSTEM
     val cols = if (props.tier == TileSizeTier.L && props.widthDp > 240f && visibleCount > 4) 3 else 2
 
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
@@ -1372,33 +1373,5 @@ fun QuickTogglesTile(props: TileContentProps) {
             }
         }
 
-        if (showBrightness) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(offBg)
-                    .padding(horizontal = 9.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(14.dp))
-                Slider(
-                    value = props.systemState.brightness,
-                    onValueChange = { if (!props.isEditMode) props.systemState.onChangeBrightness(it) },
-                    valueRange = 0.25f..1f,
-                    modifier = Modifier.weight(1f).height(24.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = props.surface.accentColor,
-                        activeTrackColor = props.surface.accentColor,
-                    ),
-                )
-                Text(
-                    text = "${(props.systemState.brightness * 100).roundToInt()}%",
-                    color = props.surface.textPrimary,
-                    style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
-                )
-            }
-        }
     }
 }

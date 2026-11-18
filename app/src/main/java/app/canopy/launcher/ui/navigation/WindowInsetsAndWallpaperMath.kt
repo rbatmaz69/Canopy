@@ -51,4 +51,11 @@ object WindowInsetsAndWallpaperMath {
     }
 
     fun shouldRenderProceduralWallpaper(useSystemWallpaper: Boolean): Boolean = !useSystemWallpaper
+
+    /** Horizontal wallpaper offset (0..1) for the current pager offset. */
+    fun wallpaperOffsetFraction(pageOffsetPx: Float, pageWidthPx: Float, pageCount: Int): Float {
+        if (pageCount <= 1 || pageWidthPx <= 1f) return 0.5f
+        val progress = -pageOffsetPx / (pageWidthPx * (pageCount - 1))
+        return progress.coerceIn(0f, 1f)
+    }
 }

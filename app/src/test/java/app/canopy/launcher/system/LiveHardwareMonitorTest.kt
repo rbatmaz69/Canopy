@@ -45,7 +45,30 @@ class LiveHardwareMonitorTest {
         assertEquals("8,0k", steps.compactLabel)
         assertTrue(steps.formattedSteps.contains("8.000"))
 
-        val updatedNotes = EigenTileActions.addQuickNoteLine(listOf("Bestehende Notiz"))
+        val updatedNotes = EigenTileActions.addNoteLine(listOf("Bestehende Notiz"), "Neue Notiz")
         assertEquals(2, updatedNotes.size)
+    }
+
+    @Test
+    fun `daily step baseline starts at zero each day and survives a reboot`() {
+        // First reading of the day becomes the baseline → 0 steps, not a made-up number.
+        val (b1, s1) = LiveHardwareMath.advanceDailySteps(null, "20261118", raw = 12_000)
+        assertEquals(0, s1)
+        val (b2, s2) = LiveHardwareMath.advanceDailySteps(b1, "20261118", raw = 12_850)
+        assertEquals(850, s2)
+        // Reboot resets the hardware counter: steps so far are carried over.
+        val (b3, s3) = LiveHardwareMath.advanceDailySteps(b2, "20261118", raw = 40)
+        assertEquals(890, s3)
+        // New day → fresh baseline.
+        val (_, s4) = LiveHardwareMath.advanceDailySteps(b3, "20261119", raw = 300)
+        assertEquals(0, s4)
+    }
+
+    @Test
+    fun `telemetry defaults never invent steps or alarms`() {
+        val snapshot = HardwareTelemetrySnapshot()
+        assertEquals(false, snapshot.stepsAvailable)
+        assertEquals(0, snapshot.steps.totalSteps)
+        assertEquals(null, snapshot.nextAlarmLabel)
     }
 }

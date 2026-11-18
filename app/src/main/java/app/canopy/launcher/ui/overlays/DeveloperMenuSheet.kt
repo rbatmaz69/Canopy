@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.ScreenLockPortrait
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -107,8 +108,16 @@ fun DeveloperMenuSheet(
     onExportLayoutJson: () -> Unit = {},
     onImportLayoutJson: () -> Unit = {},
     onResetLayout: () -> Unit,
+    developerMode: Boolean = false,
+    lockPortrait: Boolean = true,
+    onChangeLockPortrait: (Boolean) -> Unit = {},
+    hiddenApps: List<Pair<String, String>> = emptyList(),
+    onUnhideApp: (String) -> Unit = {},
+    versionLabel: String = "",
+    onUnlockDeveloperMode: () -> Unit = {},
 ) {
     if (!isOpen) return
+    var versionTapCount by remember { mutableIntStateOf(0) }
 
     Box(
         modifier = Modifier
@@ -143,17 +152,17 @@ fun DeveloperMenuSheet(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Rounded.Tune, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
-                    Text("Canopy Einstellungen", color = Color(0xFFF8FAFC), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Einstellungen", color = Color(0xFFF8FAFC), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(Color(0x1AFFFFFF))
                         .clickable { onClose() },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Entwicklermenü schließen", tint = Color(0xFFF8FAFC), modifier = Modifier.size(17.dp))
+                    Icon(Icons.Rounded.Close, contentDescription = "Einstellungen schließen", tint = Color(0xFFF8FAFC), modifier = Modifier.size(17.dp))
                 }
             }
 
@@ -257,8 +266,8 @@ fun DeveloperMenuSheet(
                 }
             }
 
-            // Spring Sliders
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Spring Sliders (developer only)
+            if (developerMode) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SliderRow(
                     label = "Federstärke (Steifigkeit)",
                     valueText = String.format(Locale.US, "%.2f×", motionSettings.stiffnessScale),
@@ -285,7 +294,7 @@ fun DeveloperMenuSheet(
                         modifier = Modifier.weight(1f),
                         onClick = { onChangeMotionSettings(motionSettings.copy(hapticsEnabled = !motionSettings.hapticsEnabled)) },
                     )
-                    DevToggleBtn(
+                    if (developerMode) DevToggleBtn(
                         icon = Icons.Rounded.AutoAwesome,
                         label = "Zeitlupe 0,25×: ${if (motionSettings.slowMotion) "An" else "Aus"}",
                         active = motionSettings.slowMotion,
@@ -304,7 +313,7 @@ fun DeveloperMenuSheet(
                             onChangeTonalIcons(!tonalIcons)
                         },
                     )
-                    DevToggleBtn(
+                    if (developerMode) DevToggleBtn(
                         icon = Icons.Rounded.Tune,
                         label = "Haptik-HUD: ${if (showHapticHud) "An" else "Aus"}",
                         active = showHapticHud,
@@ -312,18 +321,30 @@ fun DeveloperMenuSheet(
                         onClick = { onChangeShowHapticHud(!showHapticHud) },
                     )
                 }
-                DevToggleBtn(
-                    icon = Icons.Rounded.Wallpaper,
-                    label = "System-Wallpaper: ${if (useSystemWallpaper) "An" else "Aus"}",
-                    active = useSystemWallpaper,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
-                        onChangeUseSystemWallpaper(!useSystemWallpaper)
-                    },
-                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     DevToggleBtn(
+                        icon = Icons.Rounded.Wallpaper,
+                        label = "System-Wallpaper: ${if (useSystemWallpaper) "An" else "Aus"}",
+                        active = useSystemWallpaper,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
+                            onChangeUseSystemWallpaper(!useSystemWallpaper)
+                        },
+                    )
+                    DevToggleBtn(
+                        icon = Icons.Rounded.ScreenLockPortrait,
+                        label = "Hochformat: ${if (lockPortrait) "Fest" else "Drehbar"}",
+                        active = lockPortrait,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
+                            onChangeLockPortrait(!lockPortrait)
+                        },
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (developerMode) DevToggleBtn(
                         icon = Icons.Rounded.Speed,
                         label = "FPS-HUD: ${if (showFpsHud) "An" else "Aus"}",
                         active = showFpsHud,
@@ -368,7 +389,36 @@ fun DeveloperMenuSheet(
             }
 
             // System-Launcher & JSON Layout-Backup
-            DevSection(label = "System-Launcher & Backup") {
+            if (hiddenApps.isNotEmpty()) {
+                DevSection(label = "Ausgeblendete Apps") {
+                    hiddenApps.forEach { (id, name) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x0DFFFFFF))
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(name, color = Color(0xFFF8FAFC), fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                text = "Einblenden",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onUnhideApp(id) }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            DevSection(label = "Launcher & Sicherung") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     DevToggleBtn(
                         icon = Icons.Rounded.Home,
@@ -394,7 +444,7 @@ fun DeveloperMenuSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     DevToggleBtn(
                         icon = Icons.Rounded.FileUpload,
-                        label = "JSON Export",
+                        label = "Layout kopieren",
                         active = false,
                         modifier = Modifier.weight(1f),
                         onClick = {
@@ -404,7 +454,7 @@ fun DeveloperMenuSheet(
                     )
                     DevToggleBtn(
                         icon = Icons.Rounded.FileDownload,
-                        label = "JSON Import",
+                        label = "Layout einfügen",
                         active = false,
                         modifier = Modifier.weight(1f),
                         onClick = {
@@ -442,6 +492,31 @@ fun DeveloperMenuSheet(
                 Icon(Icons.Rounded.RestartAlt, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.size(8.dp))
                 Text("Layout zurücksetzen", color = Color(0xFFFCA5A5), fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+            }
+
+            if (versionLabel.isNotBlank()) {
+                Text(
+                    text = "Canopy $versionLabel" + if (developerMode) " · Entwickleroptionen aktiv" else "",
+                    color = Color(0xFF64748B),
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            if (!developerMode) {
+                                versionTapCount += 1
+                                if (versionTapCount >= 7) {
+                                    versionTapCount = 0
+                                    onUnlockDeveloperMode()
+                                }
+                            }
+                        }
+                        .padding(vertical = 10.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
             }
         }
     }

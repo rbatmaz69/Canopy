@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,7 +38,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.canopy.launcher.data.ColorMode
-import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.ui.components.AppSquircleIcon
 import kotlin.math.ceil
@@ -167,7 +167,7 @@ object BentoGridPlanner {
 
 @Composable
 fun AppGroupTile(props: TileContentProps) {
-    val appsById = props.allAppsCatalog.associateBy { it.id }.ifEmpty { MockCatalogData.APPS_BY_ID }
+    val appsById = remember(props.allAppsCatalog) { props.allAppsCatalog.associateBy { it.id } }
     val apps = (props.tile.appIds ?: emptyList()).mapNotNull { appsById[it] }
     var tileBounds: Rect? = null
 

@@ -12,12 +12,13 @@ import org.junit.Test
 class BadgeAndSystemSyncTest {
     @Test
     fun `system quick-setting toggles synchronize bidirectionally`() {
+        // Defaults are "off/unknown" until the real system state has been read.
         var sys = SystemControlState()
-        assertTrue(sys.wifi)
+        assertFalse(sys.wifi)
         assertFalse(sys.flashlight)
 
         sys = NotificationBadgeStore.toggleSystemKey(sys, SystemToggleKey.WIFI)
-        assertFalse(sys.wifi)
+        assertTrue(sys.wifi)
 
         sys = NotificationBadgeStore.toggleSystemKey(sys, SystemToggleKey.FLASHLIGHT)
         assertTrue(sys.flashlight)

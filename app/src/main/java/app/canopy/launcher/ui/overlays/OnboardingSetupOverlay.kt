@@ -43,6 +43,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.rounded.Star
+import app.canopy.launcher.ui.components.AppSquircleIcon
+import app.canopy.launcher.ui.tiles.AppDefinition
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -109,7 +113,11 @@ fun OnboardingSetupOverlay(
     onChangeUseSystemWallpaper: (Boolean) -> Unit,
     onSelectWeatherCity: (String) -> Unit,
     onComplete: () -> Unit,
+    apps: List<AppDefinition> = emptyList(),
+    favoriteAppIds: List<String> = emptyList(),
+    onChangeFavorites: (List<String>) -> Unit = {},
 ) {
+    val totalSteps = 4
     val context = LocalContext.current
     var step by remember { mutableIntStateOf(0) }
 
@@ -153,7 +161,7 @@ fun OnboardingSetupOverlay(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "Schritt ${step + 1} von 3",
+                        text = "Schritt ${step + 1} von $totalSteps",
                         color = Color(0xFF38BDF8),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -173,7 +181,7 @@ fun OnboardingSetupOverlay(
 
             // Step Progress Dots
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                repeat(3) { idx ->
+                repeat(totalSteps) { idx ->
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -192,7 +200,7 @@ fun OnboardingSetupOverlay(
                             Text("Als Standard-Launcher festlegen", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
                         Text(
-                            text = "Damit dein Motorola-Launcher beim Home-Wisch nicht mehr dazwischenspringt, setze Canopy als deine Standard-Start-App.",
+                            text = "Damit die Home-Geste immer bei Canopy landet, lege Canopy als Standard-Start-App fest.",
                             color = Color(0xFFCBD5E1),
                             fontSize = 13.sp,
                             lineHeight = 18.sp,
@@ -280,6 +288,10 @@ fun OnboardingSetupOverlay(
                     }
                 }
 
+                3 -> {
+                        FavoritesStep(apps = apps, selected = favoriteAppIds, onChange = onChangeFavorites)
+                }
+
                 else -> {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -288,7 +300,7 @@ fun OnboardingSetupOverlay(
                         }
                         SetupCheckRow(
                             title = "Echtes System-Wallpaper nutzen",
-                            subtitle = if (useSystemWallpaper) "Dein Motorola-Wallpaper scheint durch" else "Canopy-Hintergrund aktiv",
+                            subtitle = if (useSystemWallpaper) "Dein Hintergrundbild scheint durch" else "Canopy-Hintergrund aktiv",
                             checked = useSystemWallpaper,
                             onClick = { onChangeUseSystemWallpaper(!useSystemWallpaper) },
                         )
@@ -392,13 +404,13 @@ fun OnboardingSetupOverlay(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF38BDF8))
                         .clickable {
-                            if (step < 2) step += 1 else onComplete()
+                            if (step < totalSteps - 1) step += 1 else onComplete()
                         }
                         .padding(vertical = 11.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = if (step < 2) "Weiter" else "Fertig & Starten",
+                        text = if (step < totalSteps - 1) "Weiter" else "Fertig & Starten",
                         color = Color(0xFF0F172A),
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -437,5 +449,72 @@ private fun SetupCheckRow(
             tint = if (checked) Color(0xFF34D399) else Color(0xFF64748B),
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+
+/** Step 4: pick the apps for the "Favoriten" group on the start page. */
+@Composable
+private fun FavoritesStep(
+    apps: List<AppDefinition>,
+    selected: List<String>,
+    onChange: (List<String>) -> Unit,
+) {
+    val maxFavorites = 8
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Rounded.Star, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(22.dp))
+            Text("Wähle deine Favoriten", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            text = "Bis zu $maxFavorites Apps für deine Startseite. ${selected.size} ausgewählt.",
+            color = Color(0xFFCBD5E1),
+            fontSize = 13.sp,
+        )
+        if (apps.isEmpty()) {
+            Text("Apps werden geladen …", color = Color(0xFF94A3B8), fontSize = 12.sp)
+            return@Column
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 320.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            apps.sortedBy { it.name.lowercase() }.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { app ->
+                        val isSelected = app.id in selected
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isSelected) Color(0x3338BDF8) else Color.Transparent)
+                                .border(1.dp, if (isSelected) Color(0xFF38BDF8) else Color.Transparent, RoundedCornerShape(14.dp))
+                                .clickable {
+                                    val next = if (isSelected) selected - app.id
+                                    else if (selected.size < maxFavorites) selected + app.id
+                                    else selected
+                                    onChange(next)
+                                }
+                                .padding(vertical = 8.dp, horizontal = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            AppSquircleIcon(appId = app.id, iconKey = app.iconKey, color = app.color, size = 40.dp, contentLabel = app.name)
+                            Text(
+                                text = app.name,
+                                color = Color.White,
+                                fontSize = 10.5.sp,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
     }
 }

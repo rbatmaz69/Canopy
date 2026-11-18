@@ -310,6 +310,11 @@ fun FloatingDragGhostOverlay(
             .alpha(0.94f)
             .shadow(18.dp)
     ) {
+        // The ghost must not create a second host view for a widget: the AppWidgetHost only
+        // updates the newest view, which would freeze the real widget after the drag.
+        androidx.compose.runtime.CompositionLocalProvider(
+            app.canopy.launcher.ui.tiles.LocalAppWidgetHostFactory provides null,
+        ) {
         TileRenderer(
             tile = drag.tile,
             leafId = "drag-ghost",
@@ -323,13 +328,14 @@ fun FloatingDragGhostOverlay(
             onOpenApp = { _, _ -> },
             onOpenGroup = { _, _, _ -> },
             onOpenSearch = {},
-            onOpenFakeTileApp = { _, _ -> },
+            onOpenTileTarget = { _, _ -> },
             onUpdateTile = { _, _ -> },
             calendarEvents = calendarEvents,
             mediaState = mediaState,
             systemState = systemState,
             allAppsCatalog = allAppsCatalog,
         )
+        }
     }
 }
 

@@ -1,5 +1,9 @@
 package app.canopy.launcher.system
 
+import android.app.Notification
+import android.text.format.DateFormat
+import java.util.Date
+
 import android.app.PendingIntent
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -37,10 +41,9 @@ object NotificationBadgeStore {
     val INITIAL_NOTIFICATIONS: List<LauncherNotification> = emptyList()
 
     fun isNotificationAccessEnabled(context: android.content.Context): Boolean {
-        val flat = runCatching {
-            Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
-        }.getOrNull().orEmpty()
-        return flat.contains(context.packageName)
+        return runCatching {
+            androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+        }.getOrDefault(false)
     }
 
     private val _state = MutableStateFlow(NotificationSyncState())
@@ -106,8 +109,8 @@ object NotificationBadgeStore {
         SystemToggleKey.BLUETOOTH -> Settings.ACTION_BLUETOOTH_SETTINGS
         SystemToggleKey.FLASHLIGHT -> Settings.ACTION_DISPLAY_SETTINGS
         SystemToggleKey.DND -> "android.settings.ZEN_MODE_SETTINGS"
-        SystemToggleKey.HOTSPOT -> Settings.ACTION_WIRELESS_SETTINGS
         SystemToggleKey.AUTO_ROTATE -> Settings.ACTION_DISPLAY_SETTINGS
+        SystemToggleKey.VOLUME -> Settings.ACTION_SOUND_SETTINGS
     }
 
     fun clampWindowBrightness(brightness: Float): Float = brightness.coerceIn(0.25f, 1.0f)
@@ -116,11 +119,9 @@ object NotificationBadgeStore {
         _state.update { cur -> reduceAppOpened(cur, appId) }
     }
 
-    fun restoreDemoNotifications() {
-        _state.value = NotificationSyncState(
-            notifications = INITIAL_NOTIFICATIONS,
-            clearedBadgeAppIds = emptySet(),
-        )
+    /** Drops every notification mirrored from the system (used when the listener disconnects). */
+    fun clearSystemNotifications() {
+        _state.value = NotificationSyncState(notifications = emptyList(), clearedBadgeAppIds = emptySet())
     }
 
     fun postSystemNotification(notif: LauncherNotification) {
@@ -171,8 +172,8 @@ object NotificationBadgeStore {
             SystemToggleKey.BLUETOOTH -> state.copy(bluetooth = !state.bluetooth)
             SystemToggleKey.FLASHLIGHT -> state.copy(flashlight = !state.flashlight)
             SystemToggleKey.DND -> state.copy(dnd = !state.dnd)
-            SystemToggleKey.HOTSPOT -> state.copy(hotspot = !state.hotspot)
             SystemToggleKey.AUTO_ROTATE -> state.copy(autoRotate = !state.autoRotate)
+            SystemToggleKey.VOLUME -> state
         }
 }
 
@@ -185,38 +186,55 @@ class CanopyNotificationListenerService : NotificationListenerService() {
         NotificationBadgeStore.registerServiceCancelCallback { key ->
             runCatching { cancelNotification(key) }
         }
+        // Mirror notifications that already exist, oldest first so the newest ends up on top.
+        runCatching { activeNotifications?.sortedBy { it.postTime } }
+            .getOrNull()
+            ?.forEach { mirror(it) }
     }
 
     override fun onListenerDisconnected() {
         NotificationBadgeStore.registerServiceCancelCallback(null)
+        NotificationBadgeStore.clearSystemNotifications()
         super.onListenerDisconnected()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
-        if (sbn == null) return
-        val extras = sbn.notification?.extras ?: return
-        val title = extras.getCharSequence("android.title")?.toString().orEmpty()
-        val body = extras.getCharSequence("android.text")?.toString().orEmpty()
-        if (title.isBlank() && body.isBlank()) return
-
-        NotificationBadgeStore.postSystemNotification(
-            LauncherNotification(
-                id = "sys-${sbn.key}",
-                appId = NotificationBadgeStore.resolveCanonicalAppId(sbn.packageName),
-                appName = sbn.packageName.substringAfterLast('.').replaceFirstChar { it.uppercaseChar() },
-                title = title.ifBlank { sbn.packageName },
-                body = body,
-                time = "Jetzt",
-                hue = InstalledAppsMapper.stableHueForPackage(sbn.packageName),
-                systemKey = sbn.key,
-                contentIntent = sbn.notification?.contentIntent,
-            )
-        )
+        if (sbn != null) mirror(sbn)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
         sbn?.key?.let { NotificationBadgeStore.removeBySystemKey(it) }
+    }
+
+    private fun mirror(sbn: StatusBarNotification) {
+        if (sbn.packageName == packageName) return
+        if (sbn.isOngoing) return
+        val notification = sbn.notification ?: return
+        if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        val extras = notification.extras ?: return
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val body = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        if (title.isBlank() && body.isBlank()) return
+
+        val appLabel = runCatching {
+            val info = packageManager.getApplicationInfo(sbn.packageName, 0)
+            packageManager.getApplicationLabel(info).toString()
+        }.getOrNull() ?: sbn.packageName.substringAfterLast('.').replaceFirstChar { it.uppercaseChar() }
+
+        NotificationBadgeStore.postSystemNotification(
+            LauncherNotification(
+                id = "sys-${sbn.key}",
+                appId = "pkg:${sbn.packageName}",
+                appName = appLabel,
+                title = title.ifBlank { appLabel },
+                body = body,
+                time = DateFormat.getTimeFormat(this).format(Date(sbn.postTime)),
+                hue = InstalledAppsMapper.stableHueForPackage(sbn.packageName),
+                systemKey = sbn.key,
+                contentIntent = notification.contentIntent,
+            )
+        )
     }
 }

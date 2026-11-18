@@ -28,7 +28,12 @@ class BadgeAndSystemSyncTest {
 
     @Test
     fun `dismissing a notification or opening an app clears badges synchronously everywhere`() {
-        val initial = NotificationBadgeStore.INITIAL_NOTIFICATIONS
+        assertTrue(NotificationBadgeStore.INITIAL_NOTIFICATIONS.isEmpty())
+        val initial = listOf(
+            LauncherNotification("n1", "app-nachrichten", "Nachrichten", "Max", "Hi", "Jetzt", 217f),
+            LauncherNotification("n2", "app-mail", "Postfach", "Build", "Fertig", "vor 5 Min.", 0f),
+            LauncherNotification("n3", "app-kalender", "Kalender", "Termin", "14:00", "vor 10 Min.", 262f),
+        )
         val state0 = NotificationSyncState(notifications = initial, clearedBadgeAppIds = emptySet())
 
         // Messages has badge 3 initially

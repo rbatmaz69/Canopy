@@ -19,11 +19,16 @@ data class PersistedLauncherState(
     val shortcutBarMode: ShortcutBarMode = ShortcutBarMode.ALL,
     val motionSettings: MotionSettings = MotionSettings(),
     val alarmState: AlarmState = AlarmState(),
-    val useSystemWallpaper: Boolean = false,
+    val useSystemWallpaper: Boolean = true,
     val appUsageCounts: Map<String, Int> = emptyMap(),
     val customCalendarEvents: List<CalendarEvent> = emptyList(),
     val weatherCityId: String = "berlin",
-)
+    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+) {
+    companion object {
+        const val CURRENT_SCHEMA_VERSION = 2
+    }
+}
 
 interface LauncherStateStore {
     fun save(state: PersistedLauncherState)

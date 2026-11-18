@@ -941,7 +941,16 @@ private fun MediaTargetView(
     accentBg: Color,
 ) {
     val track = mediaState.overrideTrack
-        ?: SystemTileDefaults.MEDIA_TRACKS[mediaState.trackIndex % SystemTileDefaults.MEDIA_TRACKS.size]
+    if (track == null) {
+        Column(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("Keine aktive Wiedergabe", color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("Starte Musik oder einen Podcast in deiner Medien-App, um die Live-Steuerung hier zu nutzen.", color = muted, fontSize = 12.5.sp)
+        }
+        return
+    }
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -973,21 +982,6 @@ private fun MediaTargetView(
             Box(Modifier.size(42.dp).clip(CircleShape).background(cardBg).clickable { mediaState.onNext() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.SkipNext, contentDescription = "Weiter", tint = fg)
             }
-        }
-    }
-
-    Text("Warteschlange", color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-    SystemTileDefaults.MEDIA_TRACKS.forEachIndexed { idx, t ->
-        Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (idx == mediaState.trackIndex) accentBg else cardBg).padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text(t.title, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                Text(t.artist, color = muted, fontSize = 11.5.sp)
-            }
-            if (idx == mediaState.trackIndex) Text("Läuft", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

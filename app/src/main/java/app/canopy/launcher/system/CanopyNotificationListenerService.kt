@@ -34,35 +34,14 @@ data class NotificationSyncState(
  * and bidirectional system quick-settings toggles across the entire launcher.
  */
 object NotificationBadgeStore {
-    val INITIAL_NOTIFICATIONS: List<LauncherNotification> = listOf(
-        LauncherNotification(
-            id = "notif-msg",
-            appId = "app-nachrichten",
-            appName = "Nachrichten",
-            title = "Mara Weber",
-            body = "Perfekt! Bis 12:30 beim Design Kritik Termin.",
-            time = "vor 3 Min.",
-            hue = 217f,
-        ),
-        LauncherNotification(
-            id = "notif-mail",
-            appId = "app-mail",
-            appName = "Postfach",
-            title = "Release-Freigabe #408",
-            body = "Build erfolgreich auf Testgerät verteilt.",
-            time = "vor 21 Min.",
-            hue = 0f,
-        ),
-        LauncherNotification(
-            id = "notif-cal",
-            appId = "app-kalender",
-            appName = "Kalender",
-            title = "Game Engines in 59 Min.",
-            body = "10:00 – 11:30 · Raum B2",
-            time = "Jetzt",
-            hue = 262f,
-        ),
-    )
+    val INITIAL_NOTIFICATIONS: List<LauncherNotification> = emptyList()
+
+    fun isNotificationAccessEnabled(context: android.content.Context): Boolean {
+        val flat = runCatching {
+            Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        }.getOrNull().orEmpty()
+        return flat.contains(context.packageName)
+    }
 
     private val _state = MutableStateFlow(NotificationSyncState())
     val state: StateFlow<NotificationSyncState> = _state.asStateFlow()

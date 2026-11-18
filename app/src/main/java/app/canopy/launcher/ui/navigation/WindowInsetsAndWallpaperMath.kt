@@ -22,8 +22,8 @@ data class ComputedViewportMetrics(
  * Android WindowInsets (status bar, gesture navigation bar, and display cutouts).
  */
 object WindowInsetsAndWallpaperMath {
-    const val BASE_STATUS_BAR_DP = 34f
-    const val BASE_BOTTOM_DOCK_DP = 62f
+    const val BASE_STATUS_BAR_DP = 0f
+    const val BASE_BOTTOM_DOCK_DP = 44f
 
     fun computeViewportMetrics(
         screenWidthDp: Float,
@@ -31,8 +31,9 @@ object WindowInsetsAndWallpaperMath {
         edgePaddingDp: Float,
         insets: ViewportInsetsSpec = ViewportInsetsSpec(),
     ): ComputedViewportMetrics {
-        val statusBarHeightDp = max(BASE_STATUS_BAR_DP, insets.statusBarTopDp.coerceAtMost(64f))
-        val bottomDockHeightDp = max(BASE_BOTTOM_DOCK_DP, 54f + insets.navBarBottomDp.coerceAtMost(48f) * 0.5f)
+        val statusBarHeightDp = insets.statusBarTopDp.coerceIn(0f, 72f)
+        val navBarPad = insets.navBarBottomDp.coerceIn(0f, 64f)
+        val bottomDockHeightDp = BASE_BOTTOM_DOCK_DP + navBarPad
         val horizontalSafePad = edgePaddingDp + max(insets.cutoutLeftDp, insets.cutoutRightDp).coerceAtMost(36f)
         val tilingAreaHeightDp = (screenHeightDp - statusBarHeightDp - bottomDockHeightDp).coerceAtLeast(320f)
         val pageBoundsDp = RectFBounds(

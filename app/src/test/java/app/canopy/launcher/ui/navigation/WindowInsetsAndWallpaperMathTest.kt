@@ -18,8 +18,8 @@ class WindowInsetsAndWallpaperMathTest {
             edgePaddingDp = 8f,
             insets = ViewportInsetsSpec(),
         )
-        assertEquals(34f, base.statusBarHeightDp, 0.01f)
-        assertEquals(62f, base.bottomDockHeightDp, 0.01f)
+        assertEquals(0f, base.statusBarHeightDp, 0.01f)
+        assertEquals(44f, base.bottomDockHeightDp, 0.01f)
         assertEquals(8f, base.pageBoundsDp.x, 0.01f)
         assertEquals(374f, base.pageBoundsDp.width, 0.01f)
 
@@ -35,7 +35,7 @@ class WindowInsetsAndWallpaperMathTest {
             ),
         )
         assertEquals(48f, notched.statusBarHeightDp, 0.01f)
-        assertEquals(68f, notched.bottomDockHeightDp, 0.01f)
+        assertEquals(72f, notched.bottomDockHeightDp, 0.01f)
         assertEquals(24f, notched.pageBoundsDp.x, 0.01f)
         assertEquals(364f, notched.pageBoundsDp.width, 0.01f)
     }

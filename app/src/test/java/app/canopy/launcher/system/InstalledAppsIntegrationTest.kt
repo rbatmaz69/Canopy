@@ -14,7 +14,7 @@ import org.junit.Test
 
 class InstalledAppsIntegrationTest {
     @Test
-    fun `mergeWithCatalog binds device packages onto canonical roles and adds third-party apps`() {
+    fun `mergeWithCatalog uses real installed device packages without mixing mock apps`() {
         val installed = listOf(
             InstalledAppEntry("com.google.android.dialer", "com.android.dialer.DialtactsActivity", "Telefon", androidCategory = -1),
             InstalledAppEntry("com.android.chrome", "com.google.android.apps.chrome.Main", "Chrome", androidCategory = 7),
@@ -28,12 +28,13 @@ class InstalledAppsIntegrationTest {
             selfPackage = "app.canopy.launcher",
         )
 
-        val phone = merged.first { it.id == "app-telefon" }
-        assertEquals("com.google.android.dialer", phone.packageName)
+        assertEquals(3, merged.size)
+        val phone = merged.first { it.packageName == "com.google.android.dialer" }
+        assertEquals("pkg:com.google.android.dialer", phone.id)
         assertEquals("com.android.dialer.DialtactsActivity", phone.componentActivityName)
 
-        val browser = merged.first { it.id == "app-browser" }
-        assertEquals("com.android.chrome", browser.packageName)
+        val browser = merged.first { it.packageName == "com.android.chrome" }
+        assertEquals("pkg:com.android.chrome", browser.id)
 
         val firefox = merged.firstOrNull { it.id == "pkg:org.mozilla.fennec" }
         assertNotNull(firefox)
@@ -42,6 +43,15 @@ class InstalledAppsIntegrationTest {
 
         // Canopy itself must never appear inside the launcher catalog
         assertFalse(merged.any { it.packageName == "app.canopy.launcher" })
+
+        val remappedPages = InstalledAppsMapper.resolveRealAppIdsForPages(
+            apps = merged,
+            pages = MockCatalogData.createInitialPages(app.canopy.launcher.data.ShortcutBarMode.ALL),
+        )
+        val allMappedLeafAppIds = remappedPages
+            .flatMap { app.canopy.launcher.layout.TilingEngine.collectLeaves(it.root) }
+            .mapNotNull { it.tile.appId }
+        assertTrue(allMappedLeafAppIds.all { it.startsWith("pkg:") })
     }
 
     @Test

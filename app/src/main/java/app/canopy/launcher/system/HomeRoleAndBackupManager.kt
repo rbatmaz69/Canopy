@@ -40,6 +40,27 @@ object LayoutBackupEngine {
  * and JSON backup export/import via Clipboard and Share Sheet.
  */
 class HomeRoleAndBackupController(private val context: Context) {
+    fun isDefaultHome(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val rm = runCatching { context.getSystemService(RoleManager::class.java) }.getOrNull()
+            if (rm != null && rm.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                return rm.isRoleHeld(RoleManager.ROLE_HOME)
+            }
+        }
+        val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = runCatching { context.packageManager.resolveActivity(homeIntent, 0) }.getOrNull()
+        return resolved?.activityInfo?.packageName == context.packageName
+    }
+
+    @Suppress("PrivateApi", "WrongConstant")
+    fun expandSystemNotificationShade(): Boolean = runCatching {
+        val sbService = context.getSystemService("statusbar") ?: return false
+        val sbClass = Class.forName("android.app.StatusBarManager")
+        val method = sbClass.getMethod("expandNotificationsPanel")
+        method.invoke(sbService)
+        true
+    }.getOrDefault(false)
+
     fun buildDefaultLauncherRoleIntent(): Intent? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val rm = runCatching { context.getSystemService(RoleManager::class.java) }.getOrNull()

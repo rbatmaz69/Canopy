@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat
 import app.canopy.launcher.system.LayoutBackupEngine
 import app.canopy.launcher.ui.CanopyLauncherApp
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,7 +23,14 @@ class CanopyLauncherActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val homeSignal by homeIntentCounter.collectAsState()
-            CanopyLauncherApp(homeIntentSignal = homeSignal)
+            CanopyLauncherApp(
+                homeIntentSignal = homeSignal,
+                onSystemBarAppearance = { useLightIcons ->
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.isAppearanceLightStatusBars = !useLightIcons
+                    controller.isAppearanceLightNavigationBars = !useLightIcons
+                },
+            )
         }
     }
 

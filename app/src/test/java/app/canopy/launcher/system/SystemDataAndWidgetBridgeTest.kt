@@ -33,9 +33,9 @@ class SystemDataAndWidgetBridgeTest {
     }
 
     @Test
-    fun `mergeCalendarEvents and mergeContacts prioritize device data and fallback cleanly`() {
-        assertEquals(SystemTileDefaults.CALENDAR_EVENTS, SystemDataAndWidgetEngine.mergeCalendarEvents(emptyList()))
-        assertEquals(MockCatalogData.CONTACTS_MOCK, SystemDataAndWidgetEngine.mergeContacts(emptyList()))
+    fun `mergeCalendarEvents and mergeContacts return live device data without leaking mock entries`() {
+        assertEquals(emptyList<CalendarEvent>(), SystemDataAndWidgetEngine.mergeCalendarEvents(emptyList()))
+        assertEquals(emptyList<ContactItem>(), SystemDataAndWidgetEngine.mergeContacts(emptyList()))
 
         val liveEvent = CalendarEvent(
             id = "live-1",
@@ -50,14 +50,13 @@ class SystemDataAndWidgetBridgeTest {
         val mergedEvents = SystemDataAndWidgetEngine.mergeCalendarEvents(listOf(liveEvent))
         assertEquals(listOf(liveEvent), mergedEvents)
 
-        val dupName = MockCatalogData.CONTACTS_MOCK.first().name
         val mergedContacts = SystemDataAndWidgetEngine.mergeContacts(
             listOf(
-                ContactItem("os-1", dupName, "Gerätekontakt", "+49 170 111", 120f),
+                ContactItem("os-1", "Alex Klein", "Gerätekontakt", "+49 170 111", 120f),
                 ContactItem("os-2", "Zoe Becker", "Gerätekontakt", "+49 170 222", 240f),
             )
         )
-        assertEquals(1, mergedContacts.count { it.name.equals(dupName, ignoreCase = true) })
+        assertEquals(2, mergedContacts.size)
         assertTrue(mergedContacts.any { it.name == "Zoe Becker" })
     }
 

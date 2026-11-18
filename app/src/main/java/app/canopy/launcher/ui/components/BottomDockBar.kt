@@ -22,11 +22,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.GridView
-import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,16 +98,14 @@ fun BottomDockBar(
     theme: ThemeTokens,
     motionSettings: MotionSettings,
     showSearchActive: Boolean,
-    showQuickShadeActive: Boolean,
-    hasAnyOverlay: Boolean,
+    showSettingsActive: Boolean,
     onOpenSearch: () -> Unit,
-    onToggleQuickShade: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSelectPage: (Int) -> Unit,
     onOpenOverview: () -> Unit,
-    onHomeAction: () -> Unit,
-    onBackAction: () -> Unit,
     modifier: Modifier = Modifier,
-    dockHeightDp: Dp = 62.dp,
+    dockHeightDp: Dp = 44.dp,
+    navBarBottomDp: Dp = 0.dp,
 ) {
     val dockTokens = CanopyThemes.getDockCapsuleTokens(theme)
 
@@ -117,9 +113,9 @@ fun BottomDockBar(
         modifier = modifier
             .fillMaxWidth()
             .height(dockHeightDp)
-            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = navBarBottomDp + 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.Center,
     ) {
         // Three-part dock row (28 dp height)
         Row(
@@ -161,84 +157,21 @@ fun BottomDockBar(
                 )
             }
 
-            // Right capsule: Quick Settings (38 x 28 dp)
+            // Right capsule: Launcher Settings (38 x 28 dp)
             DockFlankCapsule(
-                active = showQuickShadeActive,
+                active = showSettingsActive,
                 dockBg = dockTokens.dockBg,
                 activePillBg = dockTokens.activePillBg,
                 activeTextColor = dockTokens.activeTextColor,
                 inactiveTextColor = theme.statusText,
                 borderColor = theme.sheetBorder,
-                description = "Schnelleinstellungen öffnen",
+                description = "Launcher-Einstellungen öffnen",
                 onClick = {
                     CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
-                    onToggleQuickShade()
+                    onOpenSettings()
                 },
             ) { tint ->
-                Icon(Icons.Rounded.Tune, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
-            }
-        }
-
-        // Android Home Pill + Back row
-        Box(
-            modifier = Modifier.fillMaxWidth().height(22.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (hasAnyOverlay) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 6.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x387D7D91))
-                        .clickable {
-                            CanopyHaptics.trigger(HapticKind.PRESS, motionSettings.hapticsEnabled)
-                            onBackAction()
-                        }
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = theme.statusText, modifier = Modifier.size(13.dp))
-                    Text("Zurück", color = theme.statusText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(118.dp)
-                    .height(18.dp)
-                    .semantics { contentDescription = "Home-Taste (Startseite)" }
-                    .clickable {
-                        CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
-                        onHomeAction()
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(110.dp)
-                        .height(4.5.dp)
-                        .clip(CircleShape)
-                        .background(theme.statusText.copy(alpha = 0.72f))
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 6.dp)
-                    .size(width = 26.dp, height = 24.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x2E7D7D91))
-                    .semantics { contentDescription = "Startseite" }
-                    .clickable {
-                        CanopyHaptics.trigger(HapticKind.SNAP, motionSettings.hapticsEnabled)
-                        onHomeAction()
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.Home, contentDescription = null, tint = theme.statusText, modifier = Modifier.size(13.dp))
+                Icon(Icons.Rounded.Settings, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
             }
         }
     }

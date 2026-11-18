@@ -13,17 +13,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -39,8 +46,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
@@ -89,7 +99,6 @@ import app.canopy.launcher.ui.navigation.PagingPhysics
 import app.canopy.launcher.ui.navigation.ViewportInsetsSpec
 import app.canopy.launcher.ui.navigation.WindowInsetsAndWallpaperMath
 import app.canopy.launcher.ui.overlays.AppGroupOverlay
-import app.canopy.launcher.ui.overlays.CanopyStatusBar
 import app.canopy.launcher.ui.overlays.CatalogAndPageManager
 import app.canopy.launcher.ui.overlays.ContextMenuOverlay
 import app.canopy.launcher.ui.overlays.ContextMenuState
@@ -128,6 +137,7 @@ private const val APP_WIDGET_HOST_ID = 0xCA90
 @Composable
 fun CanopyLauncherApp(
     homeIntentSignal: Long = 0L,
+    onSystemBarAppearance: (useLightIcons: Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val rootView = LocalView.current
@@ -135,11 +145,14 @@ fun CanopyLauncherApp(
     val scope = rememberCoroutineScope()
 
     val homeRoleAndBackupController = remember(context) { HomeRoleAndBackupController(context) }
+    var isDefaultHome by remember { mutableStateOf(homeRoleAndBackupController.isDefaultHome()) }
+    var dismissDefaultHomeBanner by remember { mutableStateOf(false) }
     var backupStatusMessage by remember { mutableStateOf<String?>(null) }
     val defaultLauncherRoleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        backupStatusMessage = "Standard-Launcher-Auswahl geprüft."
+        isDefaultHome = homeRoleAndBackupController.isDefaultHome()
+        backupStatusMessage = if (isDefaultHome) "Canopy ist als Standard-Launcher aktiv." else "Standard-Launcher-Auswahl geprüft."
     }
 
     val deviceAppsController = remember(context) { DeviceAppsController(context) }
@@ -183,6 +196,16 @@ fun CanopyLauncherApp(
     var appUsageCounts by remember { mutableStateOf(initialState.appUsageCounts) }
     var customCalendarEvents by remember { mutableStateOf(initialState.customCalendarEvents) }
     var weatherCityId by remember { mutableStateOf(initialState.weatherCityId) }
+    var schemaVersion by remember { mutableIntStateOf(initialState.schemaVersion) }
+    var didRealAppMigration by remember { mutableStateOf(initialState.schemaVersion >= PersistedLauncherState.CURRENT_SCHEMA_VERSION && store.load() != null) }
+
+    LaunchedEffect(liveAppsCatalog, didRealAppMigration) {
+        if (!didRealAppMigration && liveAppsCatalog.isNotEmpty()) {
+            pages = app.canopy.launcher.system.InstalledAppsMapper.resolveRealAppIdsForPages(liveAppsCatalog, pages)
+            schemaVersion = PersistedLauncherState.CURRENT_SCHEMA_VERSION
+            didRealAppMigration = true
+        }
+    }
 
     LaunchedEffect(weatherController, weatherCityId) {
         weatherController.refreshForCity(weatherCityId)
@@ -219,6 +242,7 @@ fun CanopyLauncherApp(
         appUsageCounts = appUsageCounts,
         customCalendarEvents = customCalendarEvents,
         weatherCityId = weatherCityId,
+        schemaVersion = schemaVersion,
     )
     LaunchedEffect(currentSnapshot) {
         store.save(currentSnapshot)
@@ -388,6 +412,9 @@ fun CanopyLauncherApp(
     }
 
     val theme = CanopyThemes.getThemeTokens(themeId, colorMode, wallpaperId, overrideBaseHue = systemWallpaperHue)
+    LaunchedEffect(theme.mode, theme.isGlass, useSystemWallpaper) {
+        onSystemBarAppearance(theme.mode == ColorMode.DARK || theme.isGlass || useSystemWallpaper)
+    }
     val iconStyle = IconStyleConfig(
         tonalIcons = tonalIcons,
         themeId = themeId,
@@ -676,15 +703,43 @@ fun CanopyLauncherApp(
                 }
 
                 Column(modifier = Modifier.fillMaxSize()) {
-                    CanopyStatusBar(
-                        theme = theme,
-                        systemState = systemState,
-                        notificationCount = notifSyncState.notifications.size,
-                        hapticsEnabled = motionSettings.hapticsEnabled,
-                        onToggleQuickShade = { showQuickShade = !showQuickShade },
-                        onOpenDevMenu = { showDevMenu = true },
-                        barHeightDp = statusBarH.dp,
-                    )
+                    Spacer(modifier = Modifier.height(statusBarH.dp))
+
+                    if (!isDefaultHome && !dismissDefaultHomeBanner) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xD90F172A))
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Als Standard-Launcher festlegen →",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    val roleIntent = homeRoleAndBackupController.buildDefaultLauncherRoleIntent()
+                                    if (roleIntent != null) {
+                                        runCatching { defaultLauncherRoleLauncher.launch(roleIntent) }
+                                            .onFailure { homeRoleAndBackupController.openHomeSettingsFallback() }
+                                    } else {
+                                        homeRoleAndBackupController.openHomeSettingsFallback()
+                                    }
+                                },
+                            )
+                            Text(
+                                text = "✕",
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { dismissDefaultHomeBanner = true },
+                            )
+                        }
+                    }
 
                     HorizontalTilingPager(
                         pages = pages,
@@ -696,7 +751,11 @@ fun CanopyLauncherApp(
                         gestureDisabled = hasAnyOverlay || activeDrag != null,
                         onSnapToPage = snapToPage,
                         onSwipeUpSearch = { showSearch = true },
-                        onSwipeDownShade = { showQuickShade = true },
+                        onSwipeDownShade = {
+                            if (!homeRoleAndBackupController.expandSystemNotificationShade()) {
+                                showQuickShade = true
+                            }
+                        },
                         onPinchOverview = { showPageOverview = true },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     ) { idx, page ->
@@ -824,21 +883,19 @@ fun CanopyLauncherApp(
                         theme = theme,
                         motionSettings = motionSettings,
                         showSearchActive = showSearch,
-                        showQuickShadeActive = showQuickShade,
-                        hasAnyOverlay = hasAnyOverlay || isEditMode,
+                        showSettingsActive = showDevMenu,
                         onOpenSearch = {
                             showQuickShade = false
                             showSearch = true
                         },
-                        onToggleQuickShade = {
+                        onOpenSettings = {
                             showSearch = false
-                            showQuickShade = !showQuickShade
+                            showDevMenu = true
                         },
                         onSelectPage = { idx -> snapToPage(idx, 0f) },
                         onOpenOverview = { showPageOverview = true },
-                        onHomeAction = handleHomeAction,
-                        onBackAction = handleBackAction,
                         dockHeightDp = bottomAreaH.dp,
+                        navBarBottomDp = navBottomDp.dp,
                     )
                 }
 
@@ -1319,7 +1376,10 @@ fun CanopyLauncherApp(
                     },
                     onResetLayout = {
                         store.reset()
-                        val fresh = MockCatalogData.createInitialPages(ShortcutBarMode.ALL)
+                        val freshBase = MockCatalogData.createInitialPages(ShortcutBarMode.ALL)
+                        val fresh = if (liveAppsCatalog.isNotEmpty()) {
+                            app.canopy.launcher.system.InstalledAppsMapper.resolveRealAppIdsForPages(liveAppsCatalog, freshBase)
+                        } else freshBase
                         pages = fresh
                         shortcutBarMode = ShortcutBarMode.ALL
                         homePageId = "page-start"
@@ -1329,7 +1389,7 @@ fun CanopyLauncherApp(
                         tonalIcons = true
                         motionSettings = app.canopy.launcher.data.MotionSettings()
                         alarmState = AlarmState()
-                        useSystemWallpaper = false
+                        useSystemWallpaper = true
                         appUsageCounts = emptyMap()
                         customCalendarEvents = emptyList()
                         weatherCityId = "berlin"

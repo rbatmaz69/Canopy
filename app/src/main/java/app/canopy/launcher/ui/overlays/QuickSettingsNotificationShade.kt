@@ -228,7 +228,7 @@ fun QuickSettingsNotificationShade(
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Schnelleinstellungen", color = theme.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Text("Statusleiste antippen", color = theme.textMuted, fontSize = 11.sp)
+                Text("System-Panels öffnen", color = theme.textMuted, fontSize = 11.sp)
             }
 
             // 3x2 System Toggle Grid
@@ -245,7 +245,11 @@ fun QuickSettingsNotificationShade(
                                 .combinedClickable(
                                     onClick = {
                                         CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
-                                        systemState.onToggle(item.key)
+                                        if (item.key == SystemToggleKey.FLASHLIGHT) {
+                                            systemState.onToggle(item.key)
+                                        } else {
+                                            onLongPressToggle(item.key)
+                                        }
                                     },
                                     onLongClick = {
                                         CanopyHaptics.trigger(HapticKind.EDIT_ENTER, hapticsEnabled)
@@ -313,25 +317,42 @@ fun QuickSettingsNotificationShade(
                             .padding(horizontal = 9.dp, vertical = 4.dp),
                     )
                 } else {
-                    Text(
-                        text = "Demo-Mitteilungen",
-                        color = Color(0xFF38BDF8),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(Color(0x2E38BDF8))
-                            .clickable {
-                                CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
-                                onRestoreDemoNotifications()
-                            }
-                            .padding(horizontal = 9.dp, vertical = 4.dp),
-                    )
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val hasAccess = remember(context) { NotificationBadgeStore.isNotificationAccessEnabled(context) }
+                    if (!hasAccess) {
+                        Text(
+                            text = "Zugriff erlauben",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color(0x2E38BDF8))
+                                .clickable {
+                                    CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
+                                    runCatching {
+                                        context.startActivity(
+                                            android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 9.dp, vertical = 4.dp),
+                        )
+                    }
                 }
             }
 
             if (notifications.isEmpty()) {
-                Text("Keine ungelesenen Mitteilungen.", color = theme.textMuted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp))
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val hasAccess = remember(context) { NotificationBadgeStore.isNotificationAccessEnabled(context) }
+                Text(
+                    text = if (hasAccess) "Keine ungelesenen Mitteilungen." else "Benachrichtigungszugriff in den Android-Einstellungen aktivieren.",
+                    color = theme.textMuted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 4.dp),
+                )
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     notifications.forEach { notif ->

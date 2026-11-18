@@ -75,9 +75,50 @@ object MediaTileHelpers {
 
 @Composable
 fun MediaTile(props: TileContentProps) {
-    val track = props.mediaState.overrideTrack ?: SystemTileDefaults.MEDIA_TRACKS[
-        props.mediaState.trackIndex % SystemTileDefaults.MEDIA_TRACKS.size
-    ]
+    val liveTrack = props.mediaState.overrideTrack
+    if (liveTrack == null) {
+        val musicAppId = props.allAppsCatalog.firstOrNull {
+            it.iconKey == "Music2" || it.iconKey == "Headphones"
+        }?.id ?: "app-musik"
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(enabled = !props.isEditMode) {
+                    props.onOpenApp(musicAppId, null)
+                },
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Album,
+                contentDescription = "Medien",
+                tint = props.surface.accentColor,
+                modifier = Modifier.size(24.dp),
+            )
+            if (props.tier != TileSizeTier.XS) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Keine Wiedergabe",
+                    color = props.surface.textPrimary,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (props.tier != TileSizeTier.TICKER) {
+                    Text(
+                        text = "Tippen für Musik-App",
+                        color = props.surface.textSecondary,
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        return
+    }
+    val track = liveTrack
     val isLargeHero = props.tile.mediaLarge == true || props.tier == TileSizeTier.L
 
     when (props.tier) {

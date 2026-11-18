@@ -70,7 +70,7 @@ object SystemDataAndWidgetEngine {
 
     fun mergeCalendarEvents(
         deviceEvents: List<CalendarEvent>,
-        fallbackEvents: List<CalendarEvent> = SystemTileDefaults.CALENDAR_EVENTS,
+        fallbackEvents: List<CalendarEvent> = emptyList(),
     ): List<CalendarEvent> {
         if (deviceEvents.isEmpty()) return fallbackEvents
         return deviceEvents.sortedBy { it.startHour }
@@ -78,7 +78,7 @@ object SystemDataAndWidgetEngine {
 
     fun mergeContacts(
         deviceContacts: List<ContactItem>,
-        fallbackContacts: List<ContactItem> = MockCatalogData.CONTACTS_MOCK,
+        fallbackContacts: List<ContactItem> = emptyList(),
     ): List<ContactItem> {
         if (deviceContacts.isEmpty()) return fallbackContacts
         val seenNames = mutableSetOf<String>()

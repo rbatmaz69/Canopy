@@ -21,6 +21,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import app.canopy.launcher.data.MockCatalogData
+import app.canopy.launcher.data.ShortcutBarMode
+import app.canopy.launcher.layout.LauncherPage
+import app.canopy.launcher.layout.LeafNode
+import app.canopy.launcher.layout.PageKind
+import app.canopy.launcher.layout.SplitDirection
+import app.canopy.launcher.layout.SplitNode
+import app.canopy.launcher.layout.TileData
+import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.ui.tiles.AppCategory
 import app.canopy.launcher.ui.tiles.AppDefinition
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,31 +133,7 @@ object InstalledAppsMapper {
         }
         if (validInstalled.isEmpty()) return catalog
 
-        val claimedPackages = mutableSetOf<String>()
-        val updatedCatalog = catalog.map { existing ->
-            val directMatch = validInstalled.firstOrNull { entry ->
-                entry.packageName == existing.packageName
-            }
-            val semanticMatch = directMatch ?: validInstalled.firstOrNull { entry ->
-                entry.packageName !in claimedPackages && (
-                    entry.label.equals(existing.name, ignoreCase = true) ||
-                        (existing.iconKey == inferIconKey(entry.packageName, entry.label) &&
-                            existing.iconKey != "Sparkles")
-                    )
-            }
-            if (semanticMatch != null) {
-                claimedPackages += semanticMatch.packageName
-                existing.copy(
-                    packageName = semanticMatch.packageName,
-                    componentActivityName = semanticMatch.activityName,
-                )
-            } else {
-                existing
-            }
-        }
-
-        val extras = validInstalled
-            .filter { it.packageName !in claimedPackages }
+        return validInstalled
             .distinctBy { it.packageName }
             .map { entry ->
                 val hue = stableHueForPackage(entry.packageName)
@@ -161,7 +145,7 @@ object InstalledAppsMapper {
                     hue = hue,
                     category = mapCategory(entry.androidCategory, entry.packageName, entry.label),
                     badge = null,
-                    usageScore = 70,
+                    usageScore = 75,
                     subtitle = entry.packageName,
                     isNew = entry.isNewInstall,
                     packageName = entry.packageName,
@@ -169,8 +153,85 @@ object InstalledAppsMapper {
                 )
             }
             .sortedBy { it.name.lowercase(Locale.ROOT) }
+    }
 
-        return updatedCatalog + extras
+    fun resolveRealAppIdsForPages(
+        apps: List<AppDefinition>,
+        pages: List<LauncherPage>,
+    ): List<LauncherPage> {
+        if (apps.isEmpty()) return pages
+        val byIcon = apps.groupBy { it.iconKey }
+        fun pickForMockId(mockId: String): String? {
+            val directPkg = apps.firstOrNull { it.id == mockId }?.id
+            if (directPkg != null) return directPkg
+            val iconMatch = when (mockId) {
+                "app-telefon" -> byIcon["Phone"]?.firstOrNull()?.id
+                "app-nachrichten" -> byIcon["MessageCircle"]?.firstOrNull()?.id
+                "app-kamera" -> byIcon["Camera"]?.firstOrNull()?.id
+                "app-browser" -> byIcon["Compass"]?.firstOrNull()?.id
+                "app-mail" -> byIcon["Mail"]?.firstOrNull()?.id
+                "app-musik", "app-podcast" -> byIcon["Music2"]?.firstOrNull()?.id ?: byIcon["Headphones"]?.firstOrNull()?.id
+                "app-karten" -> byIcon["MapPin"]?.firstOrNull()?.id
+                "app-kalender" -> byIcon["Calendar"]?.firstOrNull()?.id
+                "app-uhr" -> byIcon["AlarmClock"]?.firstOrNull()?.id
+                "app-notizen" -> byIcon["FileText"]?.firstOrNull()?.id
+                "app-einstellungen" -> byIcon["Settings"]?.firstOrNull()?.id
+                "app-rechner" -> byIcon["Calculator"]?.firstOrNull()?.id
+                "app-galerie", "app-fotos" -> byIcon["Image"]?.firstOrNull()?.id
+                "app-wetter" -> byIcon["CloudRain"]?.firstOrNull()?.id
+                "app-fitness" -> byIcon["Activity"]?.firstOrNull()?.id
+                else -> null
+            }
+            return iconMatch
+        }
+
+        val fallbackPool = apps.map { it.id }
+        var fallbackCursor = 0
+        fun nextFallback(exclude: Set<String>): String? {
+            repeat(fallbackPool.size) {
+                val cand = fallbackPool[fallbackCursor % fallbackPool.size]
+                fallbackCursor += 1
+                if (cand !in exclude) return cand
+            }
+            return fallbackPool.firstOrNull()
+        }
+
+        fun remapNode(node: app.canopy.launcher.layout.TreeNode): app.canopy.launcher.layout.TreeNode = when (node) {
+            is LeafNode -> {
+                val tile = node.tile
+                val mappedAppId = tile.appId?.let { oldId ->
+                    pickForMockId(oldId) ?: apps.firstOrNull()?.id
+                }
+                val mappedGroupIds = tile.appIds?.let { ids ->
+                    val resolved = mutableListOf<String>()
+                    val used = mutableSetOf<String>()
+                    ids.forEach { oldId ->
+                        val picked = pickForMockId(oldId)?.takeIf { it !in used } ?: nextFallback(used)
+                        if (picked != null && used.add(picked)) {
+                            resolved += picked
+                        }
+                    }
+                    resolved
+                }
+                val mappedNewIds = if (tile.type == TileType.NEWLY_INSTALLED) {
+                    val newest = apps.filter { it.isNew }.map { it.id }.ifEmpty { apps.take(4).map { it.id } }
+                    newest.take(4)
+                } else tile.newAppIds
+                node.copy(
+                    tile = tile.copy(
+                        appId = mappedAppId,
+                        appIds = mappedGroupIds,
+                        newAppIds = mappedNewIds,
+                    )
+                )
+            }
+            is SplitNode -> node.copy(
+                first = remapNode(node.first),
+                second = remapNode(node.second),
+            )
+        }
+
+        return pages.map { p -> p.copy(root = remapNode(p.root)) }
     }
 
     fun computeClipRevealSpec(
@@ -247,7 +308,7 @@ class DeviceAppsController(private val context: Context) {
         context.getSystemService(LauncherApps::class.java)
     }.getOrNull()
 
-    private val _catalogFlow = MutableStateFlow(MockCatalogData.APPS_CATALOG)
+    private val _catalogFlow = MutableStateFlow<List<AppDefinition>>(emptyList())
     val catalogFlow: StateFlow<List<AppDefinition>> = _catalogFlow.asStateFlow()
 
     private var cachedShortcuts: Map<String, List<ShortcutInfo>> = emptyMap()

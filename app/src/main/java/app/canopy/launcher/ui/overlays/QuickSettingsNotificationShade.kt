@@ -83,16 +83,17 @@ fun CanopyStatusBar(
     onToggleQuickShade: () -> Unit,
     onOpenDevMenu: () -> Unit,
     modifier: Modifier = Modifier,
+    barHeightDp: Dp = 34.dp,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(34.dp)
+            .height(barHeightDp)
             .clickable {
                 CanopyHaptics.trigger(HapticKind.PRESS, hapticsEnabled)
                 onToggleQuickShade()
             }
-            .padding(start = 18.dp, end = 18.dp, top = 8.dp),
+            .padding(start = 18.dp, end = 18.dp, top = (barHeightDp - 26.dp).coerceAtLeast(8.dp)),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

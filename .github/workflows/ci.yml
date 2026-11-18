@@ -1,0 +1,39 @@
+name: Canopy CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  web-prototype:
+    name: Web Reference Prototype Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mockups/web-prototype
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --ignore-scripts
+      - run: npx vitest run
+
+  android-launcher:
+    name: Android Unit Tests, Compose AndroidTest & Debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - run: ./gradlew testDebugUnitTest compileDebugAndroidTestKotlin assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canopy-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

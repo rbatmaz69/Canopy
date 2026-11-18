@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -108,13 +109,14 @@ fun BottomDockBar(
     onHomeAction: () -> Unit,
     onBackAction: () -> Unit,
     modifier: Modifier = Modifier,
+    dockHeightDp: Dp = 62.dp,
 ) {
     val dockTokens = CanopyThemes.getDockCapsuleTokens(theme)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(62.dp)
+            .height(dockHeightDp)
             .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,

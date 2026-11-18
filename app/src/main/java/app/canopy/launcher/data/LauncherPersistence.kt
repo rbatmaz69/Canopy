@@ -18,6 +18,7 @@ data class PersistedLauncherState(
     val shortcutBarMode: ShortcutBarMode = ShortcutBarMode.ALL,
     val motionSettings: MotionSettings = MotionSettings(),
     val alarmState: AlarmState = AlarmState(),
+    val useSystemWallpaper: Boolean = false,
 )
 
 interface LauncherStateStore {

@@ -14,9 +14,13 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -36,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import app.canopy.launcher.data.AlarmState
@@ -69,6 +74,8 @@ import app.canopy.launcher.ui.components.IconStyleConfig
 import app.canopy.launcher.ui.components.LocalIconStyle
 import app.canopy.launcher.ui.navigation.HorizontalTilingPager
 import app.canopy.launcher.ui.navigation.PagingPhysics
+import app.canopy.launcher.ui.navigation.ViewportInsetsSpec
+import app.canopy.launcher.ui.navigation.WindowInsetsAndWallpaperMath
 import app.canopy.launcher.ui.overlays.AppGroupOverlay
 import app.canopy.launcher.ui.overlays.CanopyStatusBar
 import app.canopy.launcher.ui.overlays.CatalogAndPageManager
@@ -139,6 +146,7 @@ fun CanopyLauncherApp() {
     var tonalIcons by remember { mutableStateOf(initialState.tonalIcons) }
     var motionSettings by remember { mutableStateOf(initialState.motionSettings) }
     var alarmState by remember { mutableStateOf(initialState.alarmState) }
+    var useSystemWallpaper by remember { mutableStateOf(initialState.useSystemWallpaper) }
 
     var calendarEvents by remember {
         mutableStateOf(SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents()))
@@ -152,7 +160,7 @@ fun CanopyLauncherApp() {
 
     // Persist launcher state changes automatically
     LaunchedEffect(
-        pages, homePageId, themeId, colorMode, wallpaperId, tonalIcons, shortcutBarMode, motionSettings, alarmState
+        pages, homePageId, themeId, colorMode, wallpaperId, tonalIcons, shortcutBarMode, motionSettings, alarmState, useSystemWallpaper
     ) {
         store.save(
             PersistedLauncherState(
@@ -165,6 +173,7 @@ fun CanopyLauncherApp() {
                 shortcutBarMode = shortcutBarMode,
                 motionSettings = motionSettings,
                 alarmState = alarmState,
+                useSystemWallpaper = useSystemWallpaper,
             )
         )
     }
@@ -295,24 +304,37 @@ fun CanopyLauncherApp() {
         clearedBadgeAppIds = notifSyncState.clearedBadgeAppIds,
     )
 
+    val showProceduralWallpaper = WindowInsetsAndWallpaperMath.shouldRenderProceduralWallpaper(useSystemWallpaper)
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F1117))
+            .background(if (showProceduralWallpaper) Color(0xFF0F1117) else Color.Transparent)
     ) {
+        val layoutDirection = LocalLayoutDirection.current
+        val statusTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp().value }
+        val navBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp().value }
+        val cutoutLeftDp = with(density) { WindowInsets.displayCutout.getLeft(this, layoutDirection).toDp().value }
+        val cutoutRightDp = with(density) { WindowInsets.displayCutout.getRight(this, layoutDirection).toDp().value }
+
         val screenWidthDp = maxWidth.value
         val screenHeightDp = maxHeight.value
         val screenWidthPx = with(density) { maxWidth.toPx() }
         val screenHeightPx = with(density) { maxHeight.toPx() }
-        val statusBarH = 34f
-        val bottomAreaH = 62f
-        val tilingAreaHeightDp = (screenHeightDp - statusBarH - bottomAreaH).coerceAtLeast(320f)
-        val pageBoundsDp = RectFBounds(
-            x = theme.edgePaddingDp,
-            y = 4f,
-            width = screenWidthDp - theme.edgePaddingDp * 2f,
-            height = tilingAreaHeightDp - 8f,
+        val viewport = WindowInsetsAndWallpaperMath.computeViewportMetrics(
+            screenWidthDp = screenWidthDp,
+            screenHeightDp = screenHeightDp,
+            edgePaddingDp = theme.edgePaddingDp,
+            insets = ViewportInsetsSpec(
+                statusBarTopDp = statusTopDp,
+                navBarBottomDp = navBottomDp,
+                cutoutLeftDp = cutoutLeftDp,
+                cutoutRightDp = cutoutRightDp,
+            ),
         )
+        val statusBarH = viewport.statusBarHeightDp
+        val bottomAreaH = viewport.bottomDockHeightDp
+        val tilingAreaHeightDp = viewport.tilingAreaHeightDp
+        val pageBoundsDp = viewport.pageBoundsDp
 
         val pageOffsetAnim = remember { Animatable(-startIdx * screenWidthPx) }
 
@@ -487,12 +509,14 @@ fun CanopyLauncherApp() {
                         )
                     }
             ) {
-                WallpaperCanvas(
-                    themeId = themeId,
-                    mode = colorMode,
-                    wallpaperId = wallpaperId,
-                    parallaxXPx = { PagingPhysics.computeParallaxOffsetPx(pageOffsetAnim.value) },
-                )
+                if (showProceduralWallpaper) {
+                    WallpaperCanvas(
+                        themeId = themeId,
+                        mode = colorMode,
+                        wallpaperId = wallpaperId,
+                        parallaxXPx = { PagingPhysics.computeParallaxOffsetPx(pageOffsetAnim.value) },
+                    )
+                }
 
                 Column(modifier = Modifier.fillMaxSize()) {
                     CanopyStatusBar(
@@ -502,6 +526,7 @@ fun CanopyLauncherApp() {
                         hapticsEnabled = motionSettings.hapticsEnabled,
                         onToggleQuickShade = { showQuickShade = !showQuickShade },
                         onOpenDevMenu = { showDevMenu = true },
+                        barHeightDp = statusBarH.dp,
                     )
 
                     HorizontalTilingPager(
@@ -594,6 +619,7 @@ fun CanopyLauncherApp() {
                         onOpenOverview = { showPageOverview = true },
                         onHomeAction = handleHomeAction,
                         onBackAction = handleBackAction,
+                        dockHeightDp = bottomAreaH.dp,
                     )
                 }
 
@@ -902,6 +928,7 @@ fun CanopyLauncherApp() {
                     shortcutBarMode = shortcutBarMode,
                     motionSettings = motionSettings,
                     showHapticHud = showHapticHud,
+                    useSystemWallpaper = useSystemWallpaper,
                     onClose = { showDevMenu = false },
                     onChangeThemeId = { themeId = it },
                     onChangeColorMode = { colorMode = it },
@@ -913,6 +940,7 @@ fun CanopyLauncherApp() {
                     },
                     onChangeMotionSettings = { motionSettings = it },
                     onChangeShowHapticHud = { showHapticHud = it },
+                    onChangeUseSystemWallpaper = { useSystemWallpaper = it },
                     onResetLayout = {
                         store.reset()
                         val fresh = MockCatalogData.createInitialPages(ShortcutBarMode.ALL)
@@ -925,6 +953,7 @@ fun CanopyLauncherApp() {
                         tonalIcons = true
                         motionSettings = app.canopy.launcher.data.MotionSettings()
                         alarmState = AlarmState()
+                        useSystemWallpaper = false
                         calendarEvents = SystemTileDefaults.CALENDAR_EVENTS
                         NotificationBadgeStore.restoreDemoNotifications()
                         showDevMenu = false

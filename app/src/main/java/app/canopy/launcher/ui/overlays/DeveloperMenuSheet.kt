@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Vibration
+import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -64,6 +65,7 @@ fun DeveloperMenuSheet(
     shortcutBarMode: ShortcutBarMode,
     motionSettings: MotionSettings,
     showHapticHud: Boolean,
+    useSystemWallpaper: Boolean = false,
     onClose: () -> Unit,
     onChangeThemeId: (ThemeVariantId) -> Unit,
     onChangeColorMode: (ColorMode) -> Unit,
@@ -72,6 +74,7 @@ fun DeveloperMenuSheet(
     onChangeShortcutBarMode: (ShortcutBarMode) -> Unit,
     onChangeMotionSettings: (MotionSettings) -> Unit,
     onChangeShowHapticHud: (Boolean) -> Unit,
+    onChangeUseSystemWallpaper: (Boolean) -> Unit = {},
     onResetLayout: () -> Unit,
 ) {
     if (!isOpen) return
@@ -278,6 +281,16 @@ fun DeveloperMenuSheet(
                         onClick = { onChangeShowHapticHud(!showHapticHud) },
                     )
                 }
+                DevToggleBtn(
+                    icon = Icons.Rounded.Wallpaper,
+                    label = "System-Wallpaper: ${if (useSystemWallpaper) "An" else "Aus"}",
+                    active = useSystemWallpaper,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        CanopyHaptics.trigger(HapticKind.TICK, motionSettings.hapticsEnabled)
+                        onChangeUseSystemWallpaper(!useSystemWallpaper)
+                    },
+                )
             }
 
             // 4. Reihe

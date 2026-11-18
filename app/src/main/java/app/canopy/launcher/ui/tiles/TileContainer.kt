@@ -63,7 +63,7 @@ fun TileRenderer(
     systemState: SystemControlState,
     allAppsCatalog: List<AppDefinition>,
     modifier: Modifier = Modifier,
-    bodyRenderer: @Composable (TileContentProps) -> Unit = { DefaultTileBodyPlaceholder(it) },
+    bodyRenderer: @Composable (TileContentProps) -> Unit = { DefaultTileBodyRouter(it) },
 ) {
     var prevTier by remember(leafId) { mutableStateOf<TileSizeTier?>(null) }
     val tier = TilingEngine.computeSizeTier(widthDp, heightDp, prevTier)
@@ -140,13 +140,29 @@ fun TileRenderer(
 }
 
 @Composable
-private fun DefaultTileBodyPlaceholder(props: TileContentProps) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
-        Text(
-            text = "${props.tile.title} (${props.tier})",
-            color = props.surface.textPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+fun DefaultTileBodyRouter(props: TileContentProps) {
+    when (props.tile.type) {
+        TileType.GREETING -> GreetingTile(props)
+        TileType.TEMP_CURVE -> TempCurveTile(props)
+        TileType.CALENDAR_TIMELINE -> CalendarTimelineTile(props)
+        TileType.REMINDERS -> RemindersTile(props)
+        TileType.BATTERY_STEPS -> BatteryStepsTile(props)
+        TileType.CLOCK -> ClockTile(props)
+        TileType.WEATHER -> WeatherTile(props)
+        TileType.CALENDAR -> CalendarTile(props)
+        TileType.MEDIA -> MediaTile(props)
+        TileType.NOTE -> NoteTile(props)
+        TileType.PHOTOS -> PhotosTile(props)
+        TileType.BATTERY -> BatteryTile(props)
+        TileType.STEPS -> StepsTile(props)
+        TileType.QUICK_TOGGLES -> QuickTogglesTile(props)
+        else -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+            Text(
+                text = "${props.tile.title} (${props.tier})",
+                color = props.surface.textPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }

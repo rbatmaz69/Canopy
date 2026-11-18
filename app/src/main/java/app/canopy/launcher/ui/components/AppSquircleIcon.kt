@@ -1,5 +1,6 @@
 package app.canopy.launcher.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,16 +91,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -108,6 +114,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.canopy.launcher.data.ColorMode
 import app.canopy.launcher.data.ThemeVariantId
+import app.canopy.launcher.system.InstalledAppIconCache
+import app.canopy.launcher.system.InstalledAppsMapper
 import app.canopy.launcher.ui.theme.CanopyThemes
 
 @Immutable
@@ -324,12 +332,31 @@ fun AppSquircleIcon(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = AppIconRegistry.resolveIcon(iconKey),
-                contentDescription = iconKey,
-                tint = resolved.glyphColor,
-                modifier = Modifier.size(glyphSize),
-            )
+            val context = LocalContext.current
+            val nativePkg = InstalledAppsMapper.extractPackageFromAppId(appId)
+            val nativeBitmap = remember(nativePkg) {
+                nativePkg?.let { InstalledAppIconCache.getOrLoad(context, it) }
+            }
+            if (nativeBitmap != null) {
+                Image(
+                    bitmap = nativeBitmap,
+                    contentDescription = iconKey,
+                    contentScale = ContentScale.Crop,
+                    colorFilter = if (iconStyle.tonalIcons) {
+                        ColorFilter.tint(resolved.glyphColor, BlendMode.Modulate)
+                    } else null,
+                    modifier = Modifier
+                        .size(size * 0.66f)
+                        .clip(RoundedCornerShape(cornerRadius * 0.72f)),
+                )
+            } else {
+                Icon(
+                    imageVector = AppIconRegistry.resolveIcon(iconKey),
+                    contentDescription = iconKey,
+                    tint = resolved.glyphColor,
+                    modifier = Modifier.size(glyphSize),
+                )
+            }
         }
 
         if (effectiveBadge != null) {

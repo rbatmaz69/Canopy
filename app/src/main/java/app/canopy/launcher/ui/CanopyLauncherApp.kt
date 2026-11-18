@@ -746,10 +746,15 @@ fun CanopyLauncherApp() {
                         },
                         onShowInfo = { tile, rectDp ->
                             contextMenu = null
-                            fakeApp = if (tile.type == TileType.SINGLE_APP && tile.appId != null) {
-                                FakeAppTarget(FakeAppTargetKind.APP, appId = tile.appId, sourceRect = rectDp, showInfoOnly = true)
-                            } else {
-                                FakeAppTarget(FakeAppTargetKind.TILE, tile = tile, sourceRect = rectDp, showInfoOnly = true)
+                            val appPkg = tile.appId?.let { id ->
+                                liveAppsCatalog.firstOrNull { it.id == id }?.packageName
+                            }
+                            if (!deviceAppsController.openSystemAppDetails(appPkg)) {
+                                fakeApp = if (tile.type == TileType.SINGLE_APP && tile.appId != null) {
+                                    FakeAppTarget(FakeAppTargetKind.APP, appId = tile.appId, sourceRect = rectDp, showInfoOnly = true)
+                                } else {
+                                    FakeAppTarget(FakeAppTargetKind.TILE, tile = tile, sourceRect = rectDp, showInfoOnly = true)
+                                }
                             }
                         },
                         onShortcutAction = { label, tile, rectDp ->
@@ -765,7 +770,10 @@ fun CanopyLauncherApp() {
                                 }
                                 label == "Mix wechseln" -> mediaState.onNext()
                                 label == "App-Info" && tile.type == TileType.SINGLE_APP && tile.appId != null -> {
-                                    fakeApp = FakeAppTarget(FakeAppTargetKind.APP, appId = tile.appId, sourceRect = rectDp, showInfoOnly = true)
+                                    val appPkg = liveAppsCatalog.firstOrNull { it.id == tile.appId }?.packageName
+                                    if (!deviceAppsController.openSystemAppDetails(appPkg)) {
+                                        fakeApp = FakeAppTarget(FakeAppTargetKind.APP, appId = tile.appId, sourceRect = rectDp, showInfoOnly = true)
+                                    }
                                 }
                                 tile.type == TileType.SINGLE_APP && tile.appId != null -> {
                                     openAppWithBadgeSync(tile.appId, rectDp, label)

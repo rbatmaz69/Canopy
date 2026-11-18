@@ -7,13 +7,19 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.content.pm.ShortcutInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Rect as AndroidRect
+import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.os.UserHandle
+import android.provider.Settings
 import android.view.View
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.ui.tiles.AppCategory
 import app.canopy.launcher.ui.tiles.AppDefinition
@@ -21,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -196,6 +203,39 @@ object InstalledAppsMapper {
             .take(maxNative.coerceAtLeast(0))
         return (nativeLabels + defaultShortcuts).distinct()
     }
+
+    fun isThirdPartyAppId(appId: String?): Boolean =
+        appId != null && appId.startsWith("pkg:")
+
+    fun extractPackageFromAppId(appId: String?): String? =
+        if (isThirdPartyAppId(appId)) appId!!.removePrefix("pkg:").trim().takeIf { it.isNotEmpty() } else null
+
+    fun buildAppDetailsSettingsUri(packageName: String): String =
+        "package:${packageName.trim()}"
+}
+
+/**
+ * Thread-safe in-memory cache converting installed Android application Drawables
+ * into Compose ImageBitmaps for native squircle icon rendering.
+ */
+object InstalledAppIconCache {
+    private val cache = ConcurrentHashMap<String, ImageBitmap>()
+
+    fun getOrLoad(context: Context, packageName: String): ImageBitmap? {
+        if (packageName.isBlank()) return null
+        cache[packageName]?.let { return it }
+        val loaded = runCatching {
+            val drawable = context.packageManager.getApplicationIcon(packageName)
+            val sizePx = 96
+            val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            bitmap.asImageBitmap()
+        }.getOrNull() ?: return null
+        cache[packageName] = loaded
+        return loaded
+    }
 }
 
 /**
@@ -365,6 +405,21 @@ class DeviceAppsController(private val context: Context) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             } ?: return@runCatching false
             context.startActivity(launchIntent, bundle)
+            true
+        }.getOrDefault(false)
+    }
+
+    fun openSystemAppDetails(packageName: String?): Boolean {
+        val cleanPkg = packageName?.trim().orEmpty()
+        if (cleanPkg.isEmpty()) return false
+        return runCatching {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse(InstalledAppsMapper.buildAppDetailsSettingsUri(cleanPkg)),
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
             true
         }.getOrDefault(false)
     }

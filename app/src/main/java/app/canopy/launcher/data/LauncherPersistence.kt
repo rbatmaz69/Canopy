@@ -3,6 +3,7 @@ package app.canopy.launcher.data
 import android.content.Context
 import android.content.SharedPreferences
 import app.canopy.launcher.layout.LauncherPage
+import app.canopy.launcher.ui.tiles.CalendarEvent
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,6 +21,7 @@ data class PersistedLauncherState(
     val alarmState: AlarmState = AlarmState(),
     val useSystemWallpaper: Boolean = false,
     val appUsageCounts: Map<String, Int> = emptyMap(),
+    val customCalendarEvents: List<CalendarEvent> = emptyList(),
 )
 
 interface LauncherStateStore {

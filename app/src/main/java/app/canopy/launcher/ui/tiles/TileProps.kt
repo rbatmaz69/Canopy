@@ -10,6 +10,7 @@ import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.ui.theme.ThemeTokens
 import app.canopy.launcher.ui.theme.TileSurfaceTokens
+import kotlinx.serialization.Serializable
 
 enum class AppCategory(val label: String) {
     SOCIAL("Social"),
@@ -67,6 +68,7 @@ data class MediaTrack(
 )
 
 @Immutable
+@Serializable
 data class CalendarEvent(
     val id: String,
     val title: String,

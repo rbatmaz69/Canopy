@@ -1,6 +1,7 @@
 package app.canopy.launcher.ui.overlays
 
 import android.content.Intent
+import android.provider.AlarmClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.canopy.launcher.data.AlarmState
 import app.canopy.launcher.data.ColorMode
 import app.canopy.launcher.data.MockCatalogData
 import app.canopy.launcher.data.MotionSettings
@@ -75,6 +77,7 @@ import app.canopy.launcher.data.ShortcutBarMode
 import app.canopy.launcher.data.SystemTileDefaults
 import app.canopy.launcher.data.ThemeVariantId
 import app.canopy.launcher.data.WallpaperPresetId
+import app.canopy.launcher.layout.ReminderItem
 import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.motion.CanopyHaptics
@@ -108,11 +111,36 @@ data class FakeAppTarget(
     val kind: FakeAppTargetKind,
     val appId: String? = null,
     val tile: TileData? = null,
+    val pageId: String? = null,
+    val leafId: String? = null,
     val sourceRect: Rect? = null,
     val showInfoOnly: Boolean = false,
     val webQuery: String? = null,
     val shortcutAction: String? = null,
 )
+
+object TargetViewEditorPersistence {
+    fun normalizeAlarmTime(raw: String, fallback: String = "07:15"): String {
+        val parts = raw.trim().split(":")
+        if (parts.size != 2) return fallback
+        val h = parts[0].trim().toIntOrNull() ?: return fallback
+        val m = parts[1].trim().toIntOrNull() ?: return fallback
+        if (h !in 0..23 || m !in 0..59) return fallback
+        return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
+    }
+
+    fun parseAlarmHoursAndMinutes(time: String): Pair<Int, Int> {
+        val normalized = normalizeAlarmTime(time)
+        val parts = normalized.split(":")
+        return (parts[0].toIntOrNull() ?: 7) to (parts[1].toIntOrNull() ?: 15)
+    }
+
+    fun applyReminderUpdateToTile(tile: TileData, items: List<ReminderItem>): TileData =
+        tile.copy(
+            reminders = items,
+            noteLines = items.map { it.text },
+        )
+}
 
 data class ContextMenuPlacement(
     val leftDp: Float,
@@ -304,6 +332,9 @@ fun FakeAppOverlay(
     mediaState: MediaPlayerState,
     launcherSettings: LauncherSettingsBridge,
     allAppsCatalog: List<AppDefinition> = MockCatalogData.APPS_CATALOG,
+    alarmState: AlarmState = AlarmState(),
+    onUpdateAlarmState: (AlarmState) -> Unit = {},
+    onUpdateTile: (pageId: String, leafId: String, updater: (TileData) -> TileData) -> Unit = { _, _, _ -> },
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -492,6 +523,8 @@ fun FakeAppOverlay(
                     target.tile?.type == TileType.CLOCK || app?.id == "app-uhr" -> {
                         ClockTargetView(
                             startTimerImmediately = target.shortcutAction == "Timer 25 Min.",
+                            alarmState = alarmState,
+                            onUpdateAlarmState = onUpdateAlarmState,
                             fg = fg,
                             muted = muted,
                             cardBg = cardBg,
@@ -501,7 +534,17 @@ fun FakeAppOverlay(
 
                     target.tile?.type == TileType.REMINDERS || target.tile?.type == TileType.NOTE || app?.id == "app-notizen" -> {
                         NotesTargetView(
+                            initialReminders = target.tile?.reminders?.takeIf { it.isNotEmpty() } ?: SystemTileDefaults.DEFAULT_REMINDERS,
                             checkAllInitially = target.shortcutAction == "Alle abhaken",
+                            onPersistReminders = { updated ->
+                                val pid = target.pageId
+                                val lid = target.leafId
+                                if (pid != null && lid != null) {
+                                    onUpdateTile(pid, lid) { tile ->
+                                        TargetViewEditorPersistence.applyReminderUpdateToTile(tile, updated)
+                                    }
+                                }
+                            },
                             fg = fg,
                             muted = muted,
                             cardBg = cardBg,
@@ -633,13 +676,17 @@ private fun CalendarTargetView(
 @Composable
 private fun ClockTargetView(
     startTimerImmediately: Boolean,
+    alarmState: AlarmState,
+    onUpdateAlarmState: (AlarmState) -> Unit,
     fg: Color,
     muted: Color,
     cardBg: Color,
     accentColor: Color,
 ) {
+    val context = LocalContext.current
     var seconds by remember { mutableIntStateOf(1500) }
     var running by remember(startTimerImmediately) { mutableStateOf(startTimerImmediately) }
+    var alarmDraft by remember(alarmState.timeLabel) { mutableStateOf(alarmState.timeLabel) }
 
     LaunchedEffect(running) {
         while (running && seconds > 0) {
@@ -650,6 +697,94 @@ private fun ClockTargetView(
 
     val mm = (seconds / 60).toString().padStart(2, '0')
     val ss = (seconds % 60).toString().padStart(2, '0')
+
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("Wecker · Morgenroutine", color = muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = alarmState.timeLabel,
+                    color = fg,
+                    style = TextStyle(fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (alarmState.enabled) accentColor else Color(0x297D7D91))
+                        .clickable {
+                            val normalized = TargetViewEditorPersistence.normalizeAlarmTime(alarmDraft, alarmState.timeLabel)
+                            alarmDraft = normalized
+                            onUpdateAlarmState(alarmState.copy(enabled = !alarmState.enabled, timeLabel = normalized))
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = if (alarmState.enabled) "Aktiv" else "Aus",
+                        color = if (alarmState.enabled) Color.White else fg,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x297D7D91))
+                        .clickable {
+                            val normalized = TargetViewEditorPersistence.normalizeAlarmTime(alarmDraft, alarmState.timeLabel)
+                            alarmDraft = normalized
+                            onUpdateAlarmState(alarmState.copy(enabled = true, timeLabel = normalized))
+                            val (hour, minute) = TargetViewEditorPersistence.parseAlarmHoursAndMinutes(normalized)
+                            runCatching {
+                                val intent = Intent(AlarmClock.ACTION_SET_ALARM)
+                                    .putExtra(AlarmClock.EXTRA_HOUR, hour)
+                                    .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+                                    .putExtra(AlarmClock.EXTRA_MESSAGE, "Canopy Wecker")
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                context.startActivity(intent)
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    Text("System-Wecker", color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = alarmDraft,
+                onValueChange = { nextDraft: String -> alarmDraft = nextDraft },
+                label = { Text("Uhrzeit (HH:mm)") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accentColor)
+                    .clickable {
+                        val normalized = TargetViewEditorPersistence.normalizeAlarmTime(alarmDraft, alarmState.timeLabel)
+                        alarmDraft = normalized
+                        onUpdateAlarmState(alarmState.copy(enabled = true, timeLabel = normalized))
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                Icon(Icons.Rounded.Check, contentDescription = "Wecker speichern", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(cardBg).padding(18.dp),
@@ -681,17 +816,25 @@ private fun ClockTargetView(
 
 @Composable
 private fun NotesTargetView(
+    initialReminders: List<ReminderItem>,
     checkAllInitially: Boolean,
+    onPersistReminders: (List<ReminderItem>) -> Unit,
     fg: Color,
     muted: Color,
     cardBg: Color,
     accentColor: Color,
 ) {
-    var items by remember(checkAllInitially) {
-        val base = SystemTileDefaults.DEFAULT_REMINDERS
-        mutableStateOf(if (checkAllInitially) base.map { it.copy(done = true) } else base)
+    var items by remember(initialReminders, checkAllInitially) {
+        val resolved = if (checkAllInitially) initialReminders.map { it.copy(done = true) } else initialReminders
+        mutableStateOf(resolved)
     }
     var draft by remember { mutableStateOf("") }
+
+    LaunchedEffect(checkAllInitially) {
+        if (checkAllInitially) {
+            onPersistReminders(items)
+        }
+    }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(value = draft, onValueChange = { draft = it }, label = { Text("Neuer Eintrag") }, modifier = Modifier.weight(1f), singleLine = true)
@@ -699,7 +842,9 @@ private fun NotesTargetView(
             modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(accentColor).clickable {
                 val clean = draft.trim()
                 if (clean.isNotEmpty()) {
-                    items = listOf(app.canopy.launcher.layout.ReminderItem("n-${System.currentTimeMillis()}", clean, false)) + items
+                    val updated = listOf(ReminderItem("n-${System.currentTimeMillis()}", clean, false)) + items
+                    items = updated
+                    onPersistReminders(updated)
                     draft = ""
                 }
             },
@@ -716,7 +861,9 @@ private fun NotesTargetView(
                 .clip(RoundedCornerShape(16.dp))
                 .background(cardBg)
                 .clickable {
-                    items = items.map { if (it.id == n.id) it.copy(done = !it.done) else it }
+                    val updated = items.map { if (it.id == n.id) it.copy(done = !it.done) else it }
+                    items = updated
+                    onPersistReminders(updated)
                 }
                 .padding(13.dp),
             verticalAlignment = Alignment.CenterVertically,

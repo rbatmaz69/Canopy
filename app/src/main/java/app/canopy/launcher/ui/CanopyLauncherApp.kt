@@ -182,12 +182,16 @@ fun CanopyLauncherApp(
     var alarmState by remember { mutableStateOf(initialState.alarmState) }
     var useSystemWallpaper by remember { mutableStateOf(initialState.useSystemWallpaper) }
     var appUsageCounts by remember { mutableStateOf(initialState.appUsageCounts) }
+    var customCalendarEvents by remember { mutableStateOf(initialState.customCalendarEvents) }
     val boostedAppsCatalog = remember(liveAppsCatalog, appUsageCounts) {
         AllAppsCatalogSorter.applyUsageBoost(liveAppsCatalog, appUsageCounts)
     }
 
-    var calendarEvents by remember {
-        mutableStateOf(SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents()))
+    val baseCalendarEvents = remember(systemDataProvider) {
+        SystemDataAndWidgetEngine.mergeCalendarEvents(systemDataProvider.loadTodayCalendarEvents())
+    }
+    val calendarEvents = remember(customCalendarEvents, baseCalendarEvents) {
+        customCalendarEvents + baseCalendarEvents
     }
     val notifSyncState by NotificationBadgeStore.state.collectAsState()
 
@@ -209,6 +213,7 @@ fun CanopyLauncherApp(
         alarmState = alarmState,
         useSystemWallpaper = useSystemWallpaper,
         appUsageCounts = appUsageCounts,
+        customCalendarEvents = customCalendarEvents,
     )
     LaunchedEffect(currentSnapshot) {
         store.save(currentSnapshot)
@@ -682,7 +687,14 @@ fun CanopyLauncherApp(
                             },
                             onOpenSearch = { showSearch = true },
                             onOpenFakeTileApp = { tile, rect ->
-                                fakeApp = FakeAppTarget(kind = FakeAppTargetKind.TILE, tile = tile, sourceRect = rect)
+                                val matchedLeafId = TilingEngine.collectLeaves(page.root).firstOrNull { it.tile.id == tile.id }?.id
+                                fakeApp = FakeAppTarget(
+                                    kind = FakeAppTargetKind.TILE,
+                                    tile = tile,
+                                    pageId = page.id,
+                                    leafId = matchedLeafId,
+                                    sourceRect = rect,
+                                )
                             },
                             onOpenContextMenu = { leaf, pageId, rectPx ->
                                 val rectDp = with(density) {
@@ -938,7 +950,14 @@ fun CanopyLauncherApp(
                                     openAppWithBadgeSync(tile.appId, rectDp, label)
                                 }
                                 else -> {
-                                    fakeApp = FakeAppTarget(FakeAppTargetKind.TILE, tile = tile, sourceRect = rectDp, shortcutAction = label)
+                                    fakeApp = FakeAppTarget(
+                                        kind = FakeAppTargetKind.TILE,
+                                        tile = tile,
+                                        pageId = ctxPageId,
+                                        leafId = ctxLeafId,
+                                        sourceRect = rectDp,
+                                        shortcutAction = label,
+                                    )
                                 }
                             }
                         },
@@ -1095,20 +1114,40 @@ fun CanopyLauncherApp(
                                 snapToPage((next.size - 1).coerceAtLeast(0), 0f)
                             }
                         },
+                        onRenamePage = { pid, newTitle ->
+                            pages = CatalogAndPageManager.renameRegularPage(pages, pid, newTitle)
+                        },
+                        onDuplicatePage = { pid ->
+                            val (next, newIdx) = CatalogAndPageManager.duplicateRegularPage(pages, pid)
+                            pages = next
+                            snapToPage(newIdx, 0f)
+                        },
                     )
                 }
 
                 fakeApp?.let { target ->
+                    val liveTile = if (target.pageId != null && target.leafId != null) {
+                        pages.firstOrNull { it.id == target.pageId }
+                            ?.let { TilingEngine.findLeaf(it.root, target.leafId)?.tile }
+                            ?: target.tile
+                    } else target.tile
                     FakeAppOverlay(
-                        target = target,
+                        target = target.copy(tile = liveTile),
                         containerWidthPx = screenWidthPx,
                         containerHeightPx = screenHeightPx,
                         theme = theme,
                         motionSettings = motionSettings,
                         allAppsCatalog = liveAppsCatalog,
                         calendarEvents = calendarEvents,
-                        onAddCalendarEvent = { ev -> calendarEvents = listOf(ev) + calendarEvents },
+                        onAddCalendarEvent = { ev -> customCalendarEvents = listOf(ev) + customCalendarEvents },
                         mediaState = mediaState,
+                        alarmState = alarmState,
+                        onUpdateAlarmState = { alarmState = it },
+                        onUpdateTile = { pageId, leafId, updater ->
+                            pages = pages.map { p ->
+                                if (p.id == pageId) p.copy(root = TilingEngine.updateLeafTile(p.root, leafId, updater)) else p
+                            }
+                        },
                         launcherSettings = LauncherSettingsBridge(
                             themeId = themeId,
                             colorMode = colorMode,
@@ -1185,6 +1224,7 @@ fun CanopyLauncherApp(
                                 alarmState = restored.alarmState
                                 useSystemWallpaper = restored.useSystemWallpaper
                                 appUsageCounts = restored.appUsageCounts
+                                customCalendarEvents = restored.customCalendarEvents
                                 backupStatusMessage = "Layout erfolgreich importiert (${restored.pages.size} Seiten)."
                             }
                             .onFailure { err ->
@@ -1205,8 +1245,8 @@ fun CanopyLauncherApp(
                         alarmState = AlarmState()
                         useSystemWallpaper = false
                         appUsageCounts = emptyMap()
+                        customCalendarEvents = emptyList()
                         editHistory = EditHistoryState()
-                        calendarEvents = SystemTileDefaults.CALENDAR_EVENTS
                         NotificationBadgeStore.restoreDemoNotifications()
                         showDevMenu = false
                         isEditMode = false

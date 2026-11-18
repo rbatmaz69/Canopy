@@ -41,11 +41,14 @@ import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -82,6 +85,7 @@ import app.canopy.launcher.layout.TemplateKind
 import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileType
 import app.canopy.launcher.layout.TilingEngine
+import app.canopy.launcher.layout.TreeNode
 import app.canopy.launcher.layout.WidgetKind
 import app.canopy.launcher.motion.CanopyHaptics
 import app.canopy.launcher.motion.HapticKind
@@ -207,6 +211,54 @@ object CatalogAndPageManager {
         val allAppsIdx = pages.indexOfFirst { it.kind == PageKind.ALL_APPS }
         val insertIdx = if (allAppsIdx >= 0) allAppsIdx else pages.size
         val next = pages.toMutableList().apply { add(insertIdx, newPage) }
+        return next to insertIdx
+    }
+
+    fun renameRegularPage(
+        pages: List<LauncherPage>,
+        pageId: String,
+        newTitle: String,
+    ): List<LauncherPage> {
+        val clean = newTitle.trim()
+        if (clean.isEmpty()) return pages
+        return pages.map { page ->
+            if (page.id == pageId && page.kind != PageKind.ALL_APPS) {
+                page.copy(title = clean)
+            } else {
+                page
+            }
+        }
+    }
+
+    fun cloneTreeNodeWithFreshIds(node: TreeNode): TreeNode = when (node) {
+        is LeafNode -> LeafNode(
+            id = TilingEngine.createNodeId("leaf"),
+            tile = node.tile.copy(id = TilingEngine.createNodeId("tile")),
+        )
+        is SplitNode -> SplitNode(
+            id = TilingEngine.createNodeId("split"),
+            direction = node.direction,
+            ratio = node.ratio,
+            first = cloneTreeNodeWithFreshIds(node.first),
+            second = cloneTreeNodeWithFreshIds(node.second),
+        )
+    }
+
+    fun duplicateRegularPage(
+        pages: List<LauncherPage>,
+        pageId: String,
+    ): Pair<List<LauncherPage>, Int> {
+        val sourceIdx = pages.indexOfFirst { it.id == pageId && it.kind != PageKind.ALL_APPS }
+        if (sourceIdx < 0) return pages to 0
+        val source = pages[sourceIdx]
+        val copyPage = LauncherPage(
+            id = TilingEngine.createNodeId("page"),
+            title = "${source.title} Kopie",
+            kind = PageKind.TILES,
+            root = cloneTreeNodeWithFreshIds(source.root),
+        )
+        val insertIdx = sourceIdx + 1
+        val next = pages.toMutableList().apply { add(insertIdx, copyPage) }
         return next to insertIdx
     }
 
@@ -732,9 +784,13 @@ fun PageOverviewModal(
     onAddPage: () -> Unit,
     onReorderRegularPage: (regularIndex: Int, delta: Int) -> Unit,
     onDeletePage: (String) -> Unit,
+    onRenamePage: (pageId: String, newTitle: String) -> Unit = { _, _ -> },
+    onDuplicatePage: (pageId: String) -> Unit = {},
 ) {
     val regularPages = pages.filter { it.kind != PageKind.ALL_APPS }
     val allAppsPage = pages.firstOrNull { it.kind == PageKind.ALL_APPS }
+    var editingPageId by remember { mutableStateOf<String?>(null) }
+    var editingTitleDraft by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -785,18 +841,51 @@ fun PageOverviewModal(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(page.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        if (isHome) {
-                            Text(
-                                text = "Start",
-                                color = Color(0xFF0F172A),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF38BDF8))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                        if (editingPageId == page.id) {
+                            OutlinedTextField(
+                                value = editingTitleDraft,
+                                onValueChange = { editingTitleDraft = it },
+                                singleLine = true,
+                                modifier = Modifier.width(106.dp),
                             )
+                            OverviewMiniIconBtn(Icons.Rounded.Check, disabled = false, bg = Color(0xFF38BDF8), tint = Color(0xFF0F172A)) {
+                                onRenamePage(page.id, editingTitleDraft)
+                                editingPageId = null
+                            }
+                        } else {
+                            Text(
+                                text = page.title,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    editingPageId = page.id
+                                    editingTitleDraft = page.title
+                                },
+                            )
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = "Seite umbenennen",
+                                tint = Color.White.copy(alpha = 0.72f),
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .clickable {
+                                        editingPageId = page.id
+                                        editingTitleDraft = page.title
+                                    },
+                            )
+                            if (isHome) {
+                                Text(
+                                    text = "Start",
+                                    color = Color(0xFF0F172A),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF38BDF8))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
                         }
                     }
 
@@ -846,6 +935,15 @@ fun PageOverviewModal(
                         ) {
                             CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
                             onSetHomePage(page.id)
+                        }
+                        OverviewMiniIconBtn(
+                            icon = Icons.Rounded.ContentCopy,
+                            disabled = false,
+                            bg = Color(0x29FFFFFF),
+                            tint = Color.White,
+                        ) {
+                            CanopyHaptics.trigger(HapticKind.SNAP, hapticsEnabled)
+                            onDuplicatePage(page.id)
                         }
                         if (regularPages.size > 1) {
                             OverviewMiniIconBtn(Icons.Rounded.Delete, disabled = false, bg = Color(0x40EF4444), tint = Color(0xFFFCA5A5)) {

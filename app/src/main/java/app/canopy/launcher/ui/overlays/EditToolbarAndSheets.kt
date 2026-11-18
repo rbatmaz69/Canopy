@@ -36,6 +36,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.Redo
+import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -236,6 +238,10 @@ fun EditToolbar(
     onOpenPages: () -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    canUndo: Boolean = false,
+    canRedo: Boolean = false,
+    onUndoEdit: () -> Unit = {},
+    onRedoEdit: () -> Unit = {},
 ) {
     var showTemplates by remember { mutableStateOf(false) }
     val templates = remember {
@@ -297,8 +303,29 @@ fun EditToolbar(
                 .background(theme.sheetBg)
                 .border(1.dp, theme.sheetBorder, RoundedCornerShape(22.dp))
                 .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            EditHistoryIconButton(
+                icon = Icons.AutoMirrored.Rounded.Undo,
+                description = "Rückgängig",
+                enabled = canUndo,
+                tint = theme.textPrimary,
+            ) {
+                CanopyHaptics.trigger(HapticKind.TICK, hapticsEnabled)
+                showTemplates = false
+                onUndoEdit()
+            }
+            EditHistoryIconButton(
+                icon = Icons.AutoMirrored.Rounded.Redo,
+                description = "Wiederholen",
+                enabled = canRedo,
+                tint = theme.textPrimary,
+            ) {
+                CanopyHaptics.trigger(HapticKind.TICK, hapticsEnabled)
+                showTemplates = false
+                onRedoEdit()
+            }
             EditToolbarButton(
                 icon = Icons.Rounded.Add,
                 label = "+ Kachel",
@@ -353,6 +380,27 @@ fun EditToolbar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun EditHistoryIconButton(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(width = 36.dp, height = 44.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (enabled) Color(0x1E7D7D91) else Color.Transparent)
+            .alpha(if (enabled) 1f else 0.30f)
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(17.dp))
     }
 }
 

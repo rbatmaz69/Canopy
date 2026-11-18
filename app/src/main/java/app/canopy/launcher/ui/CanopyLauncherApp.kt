@@ -30,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -53,6 +55,8 @@ import app.canopy.launcher.data.ShortcutBarMode
 import app.canopy.launcher.data.SystemTileDefaults
 import app.canopy.launcher.data.ThemeVariantId
 import app.canopy.launcher.layout.DropZone
+import app.canopy.launcher.layout.EditHistoryState
+import app.canopy.launcher.layout.LauncherPage
 import app.canopy.launcher.layout.PageKind
 import app.canopy.launcher.layout.RectFBounds
 import app.canopy.launcher.layout.TileData
@@ -68,7 +72,9 @@ import app.canopy.launcher.system.DeviceAppsController
 import app.canopy.launcher.system.HomeRoleAndBackupController
 import app.canopy.launcher.system.LiveHardwareController
 import app.canopy.launcher.system.LiveMediaSessionSnapshot
+import app.canopy.launcher.system.LiveWeatherController
 import app.canopy.launcher.system.LocalHardwareTelemetry
+import app.canopy.launcher.system.LocalWeatherSnapshot
 import app.canopy.launcher.system.NativeWidgetProviderSpec
 import app.canopy.launcher.system.NotificationBadgeStore
 import app.canopy.launcher.system.SystemDataAndWidgetEngine
@@ -148,6 +154,12 @@ fun CanopyLauncherApp(
     }
     val hardwareTelemetry by hardwareController.telemetryFlow.collectAsState()
 
+    val weatherController = remember { LiveWeatherController() }
+    LaunchedEffect(weatherController) {
+        weatherController.refresh()
+    }
+    val weatherSnapshot by weatherController.weatherFlow.collectAsState()
+
     val systemDataProvider = remember(context) { SystemDataProvider(context) }
     val nativeWidgetProviders = remember(systemDataProvider) { systemDataProvider.loadInstalledWidgetProviders() }
     val deviceContacts = remember(systemDataProvider) {
@@ -223,6 +235,14 @@ fun CanopyLauncherApp(
     var fakeApp by remember { mutableStateOf<FakeAppTarget?>(null) }
     var undoSnapshot by remember { mutableStateOf<UndoSnapshot?>(null) }
     var activeDrag by remember { mutableStateOf<ActiveTileDrag?>(null) }
+    var editHistory by remember { mutableStateOf(EditHistoryState()) }
+    var lastDividerRecordMs by remember { mutableLongStateOf(0L) }
+    val updatePagesWithHistory: (List<LauncherPage>) -> Unit = { next ->
+        if (next != pages) {
+            editHistory = editHistory.recordBeforeMutation(pages)
+            pages = next
+        }
+    }
 
     // 5-second auto-clear for Undo Banner
     LaunchedEffect(undoSnapshot) {
@@ -469,11 +489,13 @@ fun CanopyLauncherApp(
             if (targetPage != null && targetPage.kind != PageKind.ALL_APPS) {
                 val matchedAppId = liveAppsCatalog.firstOrNull { it.packageName == spec.providerPackage }?.id
                 val widgetTile = SystemDataAndWidgetEngine.buildWidgetTileFromProvider(spec, widgetId, matchedAppId)
-                pages = pages.map { p ->
-                    if (p.id == targetPage.id) {
-                        CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, widgetTile, pageBoundsDp, gapDp)
-                    } else p
-                }
+                updatePagesWithHistory(
+                    pages.map { p ->
+                        if (p.id == targetPage.id) {
+                            CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, widgetTile, pageBoundsDp, gapDp)
+                        } else p
+                    }
+                )
             }
             showCatalog = false
         }
@@ -513,6 +535,7 @@ fun CanopyLauncherApp(
             LocalCanopyTheme provides theme,
             LocalIconStyle provides iconStyle,
             LocalHardwareTelemetry provides hardwareTelemetry,
+            LocalWeatherSnapshot provides weatherSnapshot,
             LocalAppWidgetHostFactory provides { widgetId ->
                 val info = appWidgetManager?.getAppWidgetInfo(widgetId)
                 if (info != null && appWidgetHost != null) {
@@ -527,9 +550,15 @@ fun CanopyLauncherApp(
                     .fillMaxSize()
                     .pointerInput(activeDrag != null) {
                         if (activeDrag == null) return@pointerInput
+                        val velocityTracker = VelocityTracker()
                         detectDragGestures(
+                            onDragStart = { offset ->
+                                velocityTracker.resetTracking()
+                                velocityTracker.addPosition(System.currentTimeMillis(), offset)
+                            },
                             onDrag = { change, _ ->
                                 change.consume()
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
                                 activeDrag = activeDrag?.copy(
                                     pointerXRootPx = change.position.x,
                                     pointerYRootPx = change.position.y,
@@ -539,16 +568,18 @@ fun CanopyLauncherApp(
                                 val drag = activeDrag
                                 activeDrag = null
                                 if (drag != null) {
+                                    val velYPxPerSec = velocityTracker.calculateVelocity().y
+                                    val velocityYDpPerSec = with(density) { velYPxPerSec.toDp().value }
                                     val pointerYDp = with(density) { (drag.pointerYRootPx - with(density) { statusBarH.dp.toPx() }).toDp().value }
                                     val shouldRemove = TileDragEngine.shouldThrowRemove(
                                         dropPreview = dropPreview,
                                         drag = drag,
                                         pointerLocalYDp = pointerYDp,
                                         viewportHeightDp = tilingAreaHeightDp,
-                                        velocityYDpPerSec = 0f,
+                                        velocityYDpPerSec = velocityYDpPerSec,
                                     )
                                     val outcome = TileDragEngine.applyDropMutation(pages, drag, dropPreview, shouldRemove)
-                                    pages = outcome.pages
+                                    updatePagesWithHistory(outcome.pages)
                                     outcome.undoSnapshot?.let { undoSnapshot = it }
                                     outcome.hapticKind?.let { CanopyHaptics.trigger(it, motionSettings.hapticsEnabled) }
                                 }
@@ -603,19 +634,31 @@ fun CanopyLauncherApp(
                             onToggleAlarm = { alarmState = alarmState.copy(enabled = !alarmState.enabled) },
                             onEnterEditMode = { isEditMode = true },
                             onUpdateDividerRatio = { pageId, splitId, ratio ->
+                                val now = System.currentTimeMillis()
+                                if (now - lastDividerRecordMs > 600L) {
+                                    editHistory = editHistory.recordBeforeMutation(pages)
+                                    lastDividerRecordMs = now
+                                }
                                 pages = pages.map { p ->
                                     if (p.id == pageId) p.copy(root = TilingEngine.updateSplitRatio(p.root, splitId, ratio)) else p
                                 }
                             },
                             onUpdateMultipleDividerRatios = { pageId, updates ->
+                                val now = System.currentTimeMillis()
+                                if (now - lastDividerRecordMs > 600L) {
+                                    editHistory = editHistory.recordBeforeMutation(pages)
+                                    lastDividerRecordMs = now
+                                }
                                 pages = pages.map { p ->
                                     if (p.id == pageId) p.copy(root = TilingEngine.updateMultipleSplitRatios(p.root, updates)) else p
                                 }
                             },
                             onToggleDividerDirection = { pageId, splitId ->
-                                pages = pages.map { p ->
-                                    if (p.id == pageId) p.copy(root = TilingEngine.toggleSplitDirection(p.root, splitId)) else p
-                                }
+                                updatePagesWithHistory(
+                                    pages.map { p ->
+                                        if (p.id == pageId) p.copy(root = TilingEngine.toggleSplitDirection(p.root, splitId)) else p
+                                    }
+                                )
                             },
                             onUpdateTile = { pageId, leafId, updater ->
                                 pages = pages.map { p ->
@@ -721,16 +764,30 @@ fun CanopyLauncherApp(
                         onOpenCatalog = { showCatalog = true },
                         onApplyTemplate = { tpl ->
                             if (activePage != null && activePage.kind != PageKind.ALL_APPS) {
-                                pages = pages.map { p ->
-                                    if (p.id == activePage.id) {
-                                        p.copy(root = TilingEngine.applyTemplate(p.root, tpl, MockCatalogData.CATALOG_EXTRA_TILES))
-                                    } else p
-                                }
+                                updatePagesWithHistory(
+                                    pages.map { p ->
+                                        if (p.id == activePage.id) {
+                                            p.copy(root = TilingEngine.applyTemplate(p.root, tpl, MockCatalogData.CATALOG_EXTRA_TILES))
+                                        } else p
+                                    }
+                                )
                             }
                         },
                         onOpenPages = { showPageOverview = true },
                         onDone = { isEditMode = false },
                         modifier = Modifier.align(Alignment.BottomCenter),
+                        canUndo = editHistory.canUndo,
+                        canRedo = editHistory.canRedo,
+                        onUndoEdit = {
+                            val (nextHist, prevPages) = editHistory.undo(pages)
+                            editHistory = nextHist
+                            if (prevPages != null) pages = prevPages
+                        },
+                        onRedoEdit = {
+                            val (nextHist, nextPages) = editHistory.redo(pages)
+                            editHistory = nextHist
+                            if (nextPages != null) pages = nextPages
+                        },
                     )
                 }
 
@@ -795,17 +852,21 @@ fun CanopyLauncherApp(
                         },
                         onQuickGrow = { pageId, leafId ->
                             contextMenu = null
-                            pages = pages.map { p ->
-                                if (p.id == pageId) p.copy(root = TilingEngine.nudgeLeafSize(p.root, leafId, 0.14f)) else p
-                            }
+                            updatePagesWithHistory(
+                                pages.map { p ->
+                                    if (p.id == pageId) p.copy(root = TilingEngine.nudgeLeafSize(p.root, leafId, 0.14f)) else p
+                                }
+                            )
                         },
                         onQuickSplit = { pageId, leafId, rectDp ->
                             contextMenu = null
                             val zone = if (rectDp.width >= rectDp.height) DropZone.RIGHT else DropZone.BOTTOM
                             val companion = MockCatalogData.CATALOG_EXTRA_TILES[4].copy(id = TilingEngine.createNodeId("tile"))
-                            pages = pages.map { p ->
-                                if (p.id == pageId) p.copy(root = TilingEngine.splitLeaf(p.root, leafId, companion, zone, 0.5f)) else p
-                            }
+                            updatePagesWithHistory(
+                                pages.map { p ->
+                                    if (p.id == pageId) p.copy(root = TilingEngine.splitLeaf(p.root, leafId, companion, zone, 0.5f)) else p
+                                }
+                            )
                         },
                         onRemoveTile = { pageId, leafId ->
                             contextMenu = null
@@ -814,7 +875,7 @@ fun CanopyLauncherApp(
                                 val res = TilingEngine.removeLeaf(pg.root, leafId)
                                 if (res.tree != null && res.removed != null) {
                                     undoSnapshot = UndoSnapshot(pages, res.removed.tile.title)
-                                    pages = pages.map { p -> if (p.id == pageId) p.copy(root = res.tree) else p }
+                                    updatePagesWithHistory(pages.map { p -> if (p.id == pageId) p.copy(root = res.tree) else p })
                                 }
                             }
                         },
@@ -938,11 +999,13 @@ fun CanopyLauncherApp(
                         onClose = { showCatalog = false },
                         onSelectTile = { tile ->
                             if (activePage != null && activePage.kind != PageKind.ALL_APPS) {
-                                pages = pages.map { p ->
-                                    if (p.id == activePage.id) {
-                                        CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, tile, pageBoundsDp, gapDp)
-                                    } else p
-                                }
+                                updatePagesWithHistory(
+                                    pages.map { p ->
+                                        if (p.id == activePage.id) {
+                                            CatalogAndPageManager.insertCatalogTileIntoLargestLeaf(p, tile, pageBoundsDp, gapDp)
+                                        } else p
+                                    }
+                                )
                             }
                             showCatalog = false
                         },
@@ -1118,6 +1181,7 @@ fun CanopyLauncherApp(
                         alarmState = AlarmState()
                         useSystemWallpaper = false
                         appUsageCounts = emptyMap()
+                        editHistory = EditHistoryState()
                         calendarEvents = SystemTileDefaults.CALENDAR_EVENTS
                         NotificationBadgeStore.restoreDemoNotifications()
                         showDevMenu = false

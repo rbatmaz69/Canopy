@@ -89,6 +89,7 @@ import app.canopy.launcher.layout.TileData
 import app.canopy.launcher.layout.TileSizeTier
 import app.canopy.launcher.layout.TogglePreset
 import app.canopy.launcher.system.LocalHardwareTelemetry
+import app.canopy.launcher.system.LocalWeatherSnapshot
 import app.canopy.launcher.ui.theme.CanopyThemes
 import kotlin.math.max
 import kotlin.math.min
@@ -130,6 +131,7 @@ object EigenTileActions {
 @Composable
 fun GreetingTile(props: TileContentProps) {
     val hw = LocalHardwareTelemetry.current
+    val weather = LocalWeatherSnapshot.current
     val fluidGreetingSize = max(23f, min(if (props.theme.isBold) 38f else 34f, props.widthDp * 0.135f))
     when (props.tier) {
         TileSizeTier.XS -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -144,7 +146,7 @@ fun GreetingTile(props: TileContentProps) {
                 Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
                 Text(hw.greetingSingleLine, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("${hw.shortDateLabel} · 7° Bewölkt", color = props.surface.textSecondary, fontSize = 13.sp)
+            Text("${hw.shortDateLabel} · ${weather.currentTempC}° ${weather.shortCondition}", color = props.surface.textSecondary, fontSize = 13.sp)
         }
         TileSizeTier.S, TileSizeTier.LIST -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -153,7 +155,7 @@ fun GreetingTile(props: TileContentProps) {
             Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
             Column {
                 Text(hw.greetingSingleLine, color = props.surface.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp)
-                Text("${hw.shortDateLabel} · 7°", color = props.surface.textSecondary, fontSize = 12.sp)
+                Text("${hw.shortDateLabel} · ${weather.currentTempC}°", color = props.surface.textSecondary, fontSize = 12.sp)
             }
         }
         else -> Column(
@@ -182,7 +184,7 @@ fun GreetingTile(props: TileContentProps) {
                 ) {
                     Icon(Icons.Rounded.Cloud, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(14.dp))
                     Text(
-                        text = "7°",
+                        text = "${weather.currentTempC}°",
                         color = props.surface.textPrimary,
                         style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
                     )
@@ -201,7 +203,7 @@ fun GreetingTile(props: TileContentProps) {
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Bewölkt, ab 17 Uhr leichter Regen. ${props.calendarEvents.size} Termine heute.",
+                    text = "${weather.conditionLabel}. ${props.calendarEvents.size} Termine heute.",
                     color = props.surface.textSecondary,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -215,6 +217,7 @@ fun GreetingTile(props: TileContentProps) {
 
 @Composable
 fun TempCurveTile(props: TileContentProps) {
+    val weather = LocalWeatherSnapshot.current
     when (props.tier) {
         TileSizeTier.XS -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -222,7 +225,7 @@ fun TempCurveTile(props: TileContentProps) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(Icons.Rounded.Thermostat, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
-            Text("7°", color = props.surface.textPrimary, style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text("${weather.currentTempC}°", color = props.surface.textPrimary, style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         TileSizeTier.TICKER -> Row(
             modifier = Modifier.fillMaxSize(),
@@ -233,10 +236,12 @@ fun TempCurveTile(props: TileContentProps) {
                 Icon(Icons.Rounded.Thermostat, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(18.dp))
                 Text("Tagesverlauf", color = props.surface.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text("4° – 11°", color = props.surface.textPrimary, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text("${weather.lowTempC}° – ${weather.highTempC}°", color = props.surface.textPrimary, style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         else -> {
-            val series = SystemTileDefaults.TEMP_DAY_SERIES
+            val series = weather.hourlyPoints.ifEmpty { SystemTileDefaults.TEMP_DAY_SERIES }
+            val minCurveTemp = series.minOf { it.tempC }
+            val maxCurveSpan = max(4f, series.maxOf { it.tempC } - minCurveTemp)
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.SpaceBetween,
@@ -248,7 +253,7 @@ fun TempCurveTile(props: TileContentProps) {
                 ) {
                     Text("Verlauf", color = props.surface.textSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        text = if (props.widthDp < 135f) "↑11°" else "max 11°",
+                        text = if (props.widthDp < 135f) "↑${weather.highTempC}°" else "max ${weather.highTempC}°",
                         color = props.surface.accentColor,
                         style = TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
                     )
@@ -262,8 +267,9 @@ fun TempCurveTile(props: TileContentProps) {
                     val w = size.width
                     val h = size.height
                     val pts = series.mapIndexed { idx, pt ->
-                        val x = (idx.toFloat() / (series.size - 1)) * w
-                        val y = h * (0.85f - ((pt.tempC - 3f) / 10f) * 0.70f)
+                        val x = (idx.toFloat() / max(1, series.size - 1)) * w
+                        val normY = (pt.tempC - minCurveTemp) / maxCurveSpan
+                        val y = h * (0.85f - normY * 0.70f)
                         Offset(x, y)
                     }
                     val linePath = Path().apply {
@@ -300,14 +306,14 @@ fun TempCurveTile(props: TileContentProps) {
                 ) {
                     Column {
                         Text(
-                            text = "7°",
+                            text = "${weather.currentTempC}°",
                             color = props.surface.textPrimary,
                             style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
                         )
-                        Text("Tief 4°", color = props.surface.textSecondary, fontSize = 11.sp)
+                        Text("Tief ${weather.lowTempC}°", color = props.surface.textSecondary, fontSize = 11.sp)
                     }
                     if (props.tier != TileSizeTier.S) {
-                        Text("15h Peak", color = props.surface.textSecondary, fontSize = 11.sp)
+                        Text(weather.peakHourLabel, color = props.surface.textSecondary, fontSize = 11.sp)
                     }
                 }
 
@@ -318,10 +324,14 @@ fun TempCurveTile(props: TileContentProps) {
                             .padding(top = 5.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
-                        listOf("09h" to "7°", "15h" to "11°", "21h" to "6°").forEach { (hLabel, tLabel) ->
+                        listOf(
+                            series.getOrNull(1),
+                            series.getOrNull(3),
+                            series.getOrNull(5),
+                        ).filterNotNull().forEach { pt ->
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(hLabel, color = props.surface.textSecondary, fontSize = 9.5.sp)
-                                Text(tLabel, color = props.surface.textPrimary, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                Text(pt.hour, color = props.surface.textSecondary, fontSize = 9.5.sp)
+                                Text("${pt.tempC.roundToInt()}°", color = props.surface.textPrimary, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -417,6 +427,7 @@ fun ClockTile(props: TileContentProps) {
 
 @Composable
 fun WeatherTile(props: TileContentProps) {
+    val weather = LocalWeatherSnapshot.current
     val fluidTempSize = max(28f, min(if (props.theme.isBold) 46f else 42f, min(props.widthDp * 0.25f, props.heightDp * 0.25f)))
     when (props.tier) {
         TileSizeTier.XS -> Column(
@@ -425,7 +436,7 @@ fun WeatherTile(props: TileContentProps) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(Icons.Rounded.CloudQueue, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(20.dp))
-            Text("7°", color = props.surface.textPrimary, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+            Text("${weather.currentTempC}°", color = props.surface.textPrimary, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
         }
         TileSizeTier.TICKER -> Row(
             modifier = Modifier.fillMaxSize(),
@@ -434,9 +445,9 @@ fun WeatherTile(props: TileContentProps) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.CloudQueue, contentDescription = null, tint = props.surface.accentColor, modifier = Modifier.size(18.dp))
-                Text("7°", color = props.surface.textPrimary, style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
+                Text("${weather.currentTempC}°", color = props.surface.textPrimary, style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"))
             }
-            Text("Regen ab 17 Uhr", color = props.surface.textSecondary, fontSize = 12.sp)
+            Text(weather.shortCondition, color = props.surface.textSecondary, fontSize = 12.sp)
         }
         else -> Column(
             modifier = Modifier.fillMaxSize(),
@@ -448,7 +459,7 @@ fun WeatherTile(props: TileContentProps) {
                 verticalAlignment = Alignment.Top,
             ) {
                 Text(
-                    text = "7°",
+                    text = "${weather.currentTempC}°",
                     color = props.surface.textPrimary,
                     style = TextStyle(fontSize = fluidTempSize.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"),
                 )
@@ -458,7 +469,7 @@ fun WeatherTile(props: TileContentProps) {
             if (props.tier != TileSizeTier.LIST) {
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(
-                        text = "Regen ab 17 Uhr",
+                        text = weather.shortCondition,
                         color = props.surface.textSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -474,8 +485,8 @@ fun WeatherTile(props: TileContentProps) {
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("H 11° · T 4°", color = props.surface.textPrimary, style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"))
-                            Text("80%", color = props.surface.accentColor, style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"))
+                            Text("H ${weather.highTempC}° · T ${weather.lowTempC}°", color = props.surface.textPrimary, style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"))
+                            Text("${weather.rainChancePercent}%", color = props.surface.accentColor, style = TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"))
                         }
                     }
                 }
@@ -486,7 +497,7 @@ fun WeatherTile(props: TileContentProps) {
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    SystemTileDefaults.WEATHER_HOURS.forEach { hr ->
+                    weather.hourlyForecasts.forEach { hr ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(hr.hour, color = props.surface.textSecondary, fontSize = 10.sp)
                             Icon(
